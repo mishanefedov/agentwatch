@@ -1,0 +1,48 @@
+{
+  "name": "agentwatch",
+  "version": "0.0.1",
+  "description": "Local-only observability for AI coding agents. See what Claude, Codex, Cursor, Gemini, and OpenClaw are touching on your machine — in one timeline.",
+  "type": "module",
+  "bin": {
+    "agentwatch": "./bin/agentwatch.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.tsx",
+    "start": "node bin/agentwatch.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "claude-code",
+    "observability",
+    "cli",
+    "tui",
+    "local"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "chokidar": "^4.0.3",
+    "ink": "^5.1.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
