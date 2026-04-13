@@ -6,6 +6,7 @@ import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
+import { startOpenClawAdapter } from "../adapters/openclaw.js";
 import { startFsAdapter } from "../adapters/fs-watcher.js";
 import { detectWorkspaceRoot } from "../util/workspace.js";
 
@@ -61,14 +62,14 @@ export function App() {
   });
 
   useEffect(() => {
-    const stopClaude = startClaudeAdapter((e) =>
-      dispatch({ type: "event", event: e }),
-    );
-    const stopFs = startFsAdapter(workspace, (e) =>
-      dispatch({ type: "event", event: e }),
-    );
+    const onEvent = (e: AgentEvent) =>
+      dispatch({ type: "event", event: e });
+    const stopClaude = startClaudeAdapter(onEvent);
+    const stopOpenClaw = startOpenClawAdapter(onEvent);
+    const stopFs = startFsAdapter(workspace, onEvent);
     return () => {
       stopClaude();
+      stopOpenClaw();
       stopFs();
     };
   }, [workspace]);
