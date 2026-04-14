@@ -6,6 +6,8 @@ import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
 import { PermissionView } from "./PermissionView.js";
 import { EventDetail, totalDetailRows } from "./EventDetail.js";
+import { ProjectsView } from "./ProjectsView.js";
+import { buildProjectIndex } from "../util/project-index.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
@@ -63,6 +65,11 @@ type State = {
   subAgentScope: string | null;
   /** Event ids whose inline expansion is currently open. */
   expandedIds: Set<string>;
+  /** Projects-picker view state */
+  projectsOpen: boolean;
+  projectsSelectedIdx: number;
+  /** Current project filter applied to the timeline */
+  projectFilter: string | null;
 };
 
 type Action =
@@ -83,7 +90,11 @@ type Action =
   | { type: "search-backspace" }
   | { type: "scope-subagent"; subAgentId: string }
   | { type: "unscope-subagent" }
-  | { type: "toggle-expand"; eventId: string };
+  | { type: "toggle-expand"; eventId: string }
+  | { type: "toggle-projects" }
+  | { type: "projects-move"; delta: number; max: number }
+  | { type: "projects-select"; name: string }
+  | { type: "set-project-filter"; project: string | null };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -172,6 +183,31 @@ function reducer(state: State, action: Action): State {
       else next.add(action.eventId);
       return { ...state, expandedIds: next };
     }
+    case "toggle-projects":
+      return {
+        ...state,
+        projectsOpen: !state.projectsOpen,
+        projectsSelectedIdx: 0,
+        detailOpen: false,
+        showPermissions: false,
+      };
+    case "projects-move": {
+      if (action.max <= 0) return state;
+      const next = Math.max(
+        0,
+        Math.min(action.max - 1, state.projectsSelectedIdx + action.delta),
+      );
+      return { ...state, projectsSelectedIdx: next };
+    }
+    case "projects-select":
+      return {
+        ...state,
+        projectFilter: action.name,
+        projectsOpen: false,
+        selectedIdx: null,
+      };
+    case "set-project-filter":
+      return { ...state, projectFilter: action.project, selectedIdx: null };
   }
 }
 
@@ -198,6 +234,9 @@ export function App() {
     searchQuery: "",
     subAgentScope: null,
     expandedIds: new Set<string>(),
+    projectsOpen: false,
+    projectsSelectedIdx: 0,
+    projectFilter: null,
   });
 
   useEffect(() => {
@@ -230,9 +269,16 @@ export function App() {
           e.details?.subAgentId === state.subAgentScope,
       )
     : agentFiltered;
-  const filtered = state.searchQuery
-    ? scoped.filter((e) => matchesQuery(e, state.searchQuery))
+  const projectScoped = state.projectFilter
+    ? scoped.filter((e) =>
+        (e.summary ?? "").startsWith(`[${state.projectFilter}`),
+      )
     : scoped;
+  const filtered = state.searchQuery
+    ? projectScoped.filter((e) => matchesQuery(e, state.searchQuery))
+    : projectScoped;
+
+  const projects = buildProjectIndex(state.events);
 
   // Build a parent→child count index for Agent tool_use events
   const childCountByAgentId = new Map<string, number>();
@@ -291,6 +337,27 @@ export function App() {
       return;
     }
 
+    if (state.projectsOpen) {
+      if (key.escape) {
+        dispatch({ type: "toggle-projects" });
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        dispatch({ type: "projects-move", delta: 1, max: projects.length });
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        dispatch({ type: "projects-move", delta: -1, max: projects.length });
+        return;
+      }
+      if (key.return) {
+        const p = projects[state.projectsSelectedIdx];
+        if (p) dispatch({ type: "projects-select", name: p.name });
+        return;
+      }
+      return;
+    }
+
     if (state.detailOpen) {
       if (key.escape || input === "q") {
         dispatch({ type: "close-detail" });
@@ -322,6 +389,8 @@ export function App() {
         dispatch({ type: "toggle-expand", eventId: ev.id });
     }
     if (input === "X") dispatch({ type: "unscope-subagent" });
+    if (input === "P") dispatch({ type: "toggle-projects" });
+    if (input === "A") dispatch({ type: "set-project-filter", project: null });
     if (input === "a") dispatch({ type: "toggle-agents" });
     if (input === "f") {
       const presentAgents = agents.filter((a) => a.present).map((a) => a.name);
@@ -354,7 +423,13 @@ export function App() {
         filter={state.filterAgent}
         paused={state.paused}
       />
-      {state.detailOpen && selectedEvent ? (
+      {state.projectsOpen ? (
+        <ProjectsView
+          projects={projects}
+          selectedIdx={state.projectsSelectedIdx}
+          searchQuery={state.searchQuery}
+        />
+      ) : state.detailOpen && selectedEvent ? (
         <EventDetail
           event={selectedEvent}
           width={cols}
@@ -385,6 +460,13 @@ export function App() {
         </Box>
       )}
       <Box marginTop={1} flexDirection="column">
+        {state.projectFilter && (
+          <Text>
+            <Text color="yellow">↳ project </Text>
+            <Text bold>{state.projectFilter}</Text>
+            <Text dimColor>   (A for all projects, P to pick another)</Text>
+          </Text>
+        )}
         {state.subAgentScope && (
           <Text>
             <Text color="yellow">↳ scoped to subagent </Text>
@@ -405,9 +487,11 @@ export function App() {
         <Text dimColor>
           {state.searchOpen
             ? "[type to search]  [enter] confirm  [esc] clear"
-            : state.detailOpen
-              ? "[esc] close  [↑↓] scroll"
-              : `[q] quit  [↑↓] select  [→] expand  [enter] detail  [x] drill subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
+            : state.projectsOpen
+              ? "[↑↓] select project  [enter] filter  [esc] close"
+              : state.detailOpen
+                ? "[esc] close  [↑↓] scroll"
+                : `[q] quit  [↑↓] select  [→] expand  [enter] detail  [P] projects  [x] subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
         </Text>
       </Box>
     </Box>
