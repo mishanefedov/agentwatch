@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type { AgentEvent } from "../schema.js";
+import { formatUSD } from "../util/cost.js";
 
 interface Props {
   event: AgentEvent;
@@ -51,6 +52,25 @@ function buildRows(event: AgentEvent, width: number): Row[] {
   const d = event.details;
   const rows: Row[] = [];
   const max = Math.max(40, width - 4);
+
+  if (d?.usage || d?.cost != null) {
+    rows.push({ kind: "heading", text: "tokens / cost" });
+    const u = d.usage;
+    if (u) {
+      rows.push({
+        kind: "text",
+        text: `in=${u.input}  cache_create=${u.cacheCreate}  cache_read=${u.cacheRead}  out=${u.output}`,
+        dim: true,
+      });
+    }
+    if (d.cost != null) {
+      rows.push({
+        kind: "text",
+        text: `cost: ${formatUSD(d.cost)}${d.model ? `  (${d.model})` : ""}`,
+        dim: true,
+      });
+    }
+  }
 
   if (d?.fullText) {
     rows.push({ kind: "heading", text: "text" });
