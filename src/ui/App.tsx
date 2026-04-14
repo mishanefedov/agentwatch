@@ -15,6 +15,19 @@ import { readClaudePermissions } from "../util/claude-permissions.js";
 
 const MAX_EVENTS = 500;
 
+function findInsertIdx(events: AgentEvent[], ts: string): number {
+  // Binary search for the first index whose ts is <= incoming ts.
+  // Events are sorted newest (largest ts) first.
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (events[mid]!.ts > ts) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 type State = {
   events: AgentEvent[];
   filterAgent: AgentName | null;
@@ -35,8 +48,14 @@ function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "event": {
       if (state.paused) return state;
-      const events = [action.event, ...state.events].slice(0, MAX_EVENTS);
-      return { ...state, events };
+      // Insert in reverse-chronological order (newest event ts on top).
+      // Backfill arrives out-of-order so we sort on every insert rather than
+      // relying on arrival order.
+      const next = state.events.slice();
+      const idx = findInsertIdx(next, action.event.ts);
+      next.splice(idx, 0, action.event);
+      if (next.length > MAX_EVENTS) next.length = MAX_EVENTS;
+      return { ...state, events: next };
     }
     case "toggle-agents":
       return { ...state, showAgents: !state.showAgents };
