@@ -20,13 +20,23 @@ export function AgentPanel({ agents, events }: Props) {
           (acc, e) => acc + (e.details?.cost ?? 0),
           0,
         );
+        const dotColor = !a.present
+          ? "gray"
+          : a.instrumented
+            ? "green"
+            : "yellow";
+        const statusLabel = !a.present
+          ? "not detected"
+          : a.instrumented
+            ? "installed"
+            : "detected (events TBD)";
         return (
           <Box key={a.name} flexDirection="column" marginTop={1}>
-            <Text color={a.present ? "green" : "gray"}>
+            <Text color={dotColor}>
               {a.present ? "●" : "○"} {a.label}
             </Text>
-            <Text dimColor>  {a.present ? "installed" : "not detected"}</Text>
-            {a.present && (
+            <Text dimColor>  {statusLabel}</Text>
+            {a.present && a.instrumented && (
               <>
                 <Text dimColor>
                   {"  "}events: {count}

@@ -45,9 +45,26 @@ if (arg === "doctor") {
   console.log("agents:");
   for (const a of agents) {
     const mark = a.present ? "●" : "○";
-    const status = a.present ? "installed" : "not detected";
-    console.log(`  ${mark} ${a.label.padEnd(14)} ${status}`);
+    const status = !a.present
+      ? "not detected"
+      : a.instrumented
+        ? "installed (events captured)"
+        : "detected (events not yet captured — help us ship this)";
+    console.log(`  ${mark} ${a.label.padEnd(18)} ${status}`);
     if (a.configPath) console.log(`    config: ${a.configPath}`);
+  }
+  const notInstrumented = agents.filter((a) => a.present && !a.instrumented);
+  if (notInstrumented.length > 0) {
+    console.log("");
+    console.log("Agents detected but not yet instrumented:");
+    for (const a of notInstrumented) {
+      console.log(`  - ${a.label}`);
+    }
+    console.log("");
+    console.log(
+      "If you want events captured for these, open an issue with a redacted session file:",
+    );
+    console.log("  https://github.com/mishanefedov/agentwatch/issues/new");
   }
   process.exit(0);
 }
