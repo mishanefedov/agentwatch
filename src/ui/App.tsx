@@ -435,6 +435,8 @@ export function App() {
 
   const cols = stdout.columns || 120;
   const rows = stdout.rows || 30;
+  const tooNarrow = cols < 60;
+  const tooShort = rows < 12;
   const selectedEvent =
     state.selectedIdx !== null ? filtered[state.selectedIdx] : undefined;
   const detailRowCount = selectedEvent
@@ -615,6 +617,21 @@ export function App() {
     if (key.return || input === "l") dispatch({ type: "open-detail" });
     if (key.escape) dispatch({ type: "back" });
   });
+
+  if (tooNarrow || tooShort) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text color="yellow" bold>
+          Terminal too small for the agentwatch TUI
+        </Text>
+        <Text>Detected: {cols} cols × {rows} rows</Text>
+        <Text>Minimum: 60 cols × 12 rows</Text>
+        <Text> </Text>
+        <Text dimColor>Resize the window and restart, or run `agentwatch doctor` for a compact view.</Text>
+        <Text dimColor>Press q to quit.</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column">

@@ -79,6 +79,18 @@ export interface AgentEvent {
   details?: EventDetails;
 }
 
+/** Clamp an ISO timestamp so future-dated events don't break sort order.
+ *  System clock skew between agent machines + our TUI can produce `ts`
+ *  values ahead of `Date.now()`; we cap at now + 60s to accommodate
+ *  minor drift without letting a broken clock poison the timeline. */
+export function clampTs(ts: string): string {
+  const t = new Date(ts).getTime();
+  if (!Number.isFinite(t)) return new Date().toISOString();
+  const now = Date.now();
+  if (t > now + 60_000) return new Date(now).toISOString();
+  return ts;
+}
+
 export function riskOf(type: EventType, path?: string, cmd?: string): number {
   if (type === "shell_exec") {
     if (cmd && /\b(rm|sudo|curl|wget|chmod|chown)\b/.test(cmd)) return 9;

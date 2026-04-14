@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, sep } from "node:path";
 import type { AgentEvent, EventSink, EventType } from "../schema.js";
-import { riskOf } from "../schema.js";
+import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
@@ -95,9 +95,10 @@ function translate(
   kind: string,
   project: string,
 ): AgentEvent | null {
-  const ts =
+  const ts = clampTs(
     (typeof msg.timestamp === "string" && msg.timestamp) ||
-    new Date().toISOString();
+      new Date().toISOString(),
+  );
   const type = typeof msg.type === "string" ? msg.type : "";
   const text = extractText(msg.content);
 
