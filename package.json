@@ -3,20 +3,34 @@
   "version": "0.0.1",
   "description": "Local-only observability for AI coding agents. See what Claude, Codex, Cursor, Gemini, and OpenClaw are touching on your machine — in one timeline.",
   "type": "module",
+  "author": "Misha Nefedov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mishanefedov/agentwatch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mishanefedov/agentwatch/issues"
+  },
+  "homepage": "https://github.com/mishanefedov/agentwatch#readme",
   "bin": {
     "agentwatch": "./bin/agentwatch.js"
   },
   "files": [
     "bin",
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.tsx",
     "start": "node bin/agentwatch.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "ai",
