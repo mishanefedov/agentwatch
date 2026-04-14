@@ -7,6 +7,7 @@ import { riskOf } from "../schema.js";
 import { claudeProjectsDir } from "../util/workspace.js";
 import { nextId } from "../util/ids.js";
 import { costOf, parseUsage } from "../util/cost.js";
+import { markAgentWrite } from "../util/recent-writes.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
 
@@ -86,6 +87,13 @@ export function startClaudeAdapter(sink: Emit): () => void {
         const event = translateClaudeLine(obj, sessionId, project, subAgentId);
         if (event) {
           emit(event);
+          // Mark attributed writes so the fs-watcher can dedupe.
+          if (
+            event.path &&
+            (event.type === "file_write" || event.type === "file_read")
+          ) {
+            markAgentWrite(event.path, event.ts);
+          }
           // If this event is a tool_use whose result already arrived
           // (backfill ordering quirk), attach it immediately.
           const toolUseId = event.details?.toolUseId;
