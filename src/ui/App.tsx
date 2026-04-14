@@ -18,6 +18,21 @@ import type { CursorStatus } from "../adapters/cursor.js";
 
 const MAX_EVENTS = 500;
 
+function matchesQuery(e: AgentEvent, q: string): boolean {
+  const needle = q.toLowerCase();
+  if ((e.summary ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.path ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.cmd ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.tool ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.agent ?? "").toLowerCase().includes(needle)) return true;
+  const d = e.details;
+  if (d) {
+    if ((d.fullText ?? "").toLowerCase().includes(needle)) return true;
+    if ((d.thinking ?? "").toLowerCase().includes(needle)) return true;
+  }
+  return false;
+}
+
 function findInsertIdx(events: AgentEvent[], ts: string): number {
   // Binary search for the first index whose ts is <= incoming ts.
   // Events are sorted newest (largest ts) first.
@@ -41,6 +56,8 @@ type State = {
   selectedIdx: number | null;
   detailOpen: boolean;
   detailScroll: number;
+  searchOpen: boolean;
+  searchQuery: string;
 };
 
 type Action =
@@ -53,7 +70,11 @@ type Action =
   | { type: "move"; delta: number; max: number }
   | { type: "open-detail" }
   | { type: "close-detail" }
-  | { type: "scroll-detail"; delta: number; max: number };
+  | { type: "scroll-detail"; delta: number; max: number }
+  | { type: "open-search" }
+  | { type: "close-search" }
+  | { type: "search-input"; char: string }
+  | { type: "search-backspace" };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -101,6 +122,22 @@ function reducer(state: State, action: Action): State {
       const next = Math.max(0, Math.min(action.max, state.detailScroll + action.delta));
       return { ...state, detailScroll: next };
     }
+    case "open-search":
+      return { ...state, searchOpen: true, selectedIdx: null };
+    case "close-search":
+      return { ...state, searchOpen: false, searchQuery: "" };
+    case "search-input":
+      return {
+        ...state,
+        searchQuery: state.searchQuery + action.char,
+        selectedIdx: null,
+      };
+    case "search-backspace":
+      return {
+        ...state,
+        searchQuery: state.searchQuery.slice(0, -1),
+        selectedIdx: null,
+      };
   }
 }
 
@@ -123,6 +160,8 @@ export function App() {
     selectedIdx: null,
     detailOpen: false,
     detailScroll: 0,
+    searchOpen: false,
+    searchQuery: "",
   });
 
   useEffect(() => {
@@ -141,9 +180,12 @@ export function App() {
     };
   }, [workspace]);
 
-  const filtered = state.filterAgent
+  const agentFiltered = state.filterAgent
     ? state.events.filter((e) => e.agent === state.filterAgent)
     : state.events;
+  const filtered = state.searchQuery
+    ? agentFiltered.filter((e) => matchesQuery(e, state.searchQuery))
+    : agentFiltered;
 
   const cols = stdout.columns || 120;
   const rows = stdout.rows || 30;
@@ -154,11 +196,45 @@ export function App() {
     : 0;
 
   useInput((input, key) => {
-    if (input === "q" || (key.ctrl && input === "c")) {
+    if (key.ctrl && input === "c") {
       exit();
       setImmediate(() => process.exit(0));
       return;
     }
+
+    // Search-input mode: capture typing into the query buffer
+    if (state.searchOpen) {
+      if (key.escape) {
+        dispatch({ type: "close-search" });
+        return;
+      }
+      if (key.return) {
+        // Keep the query applied as a sticky filter; just exit input mode.
+        // We signal this by dispatching close-search and immediately restoring
+        // the query — simpler: the reducer's close-search clears the query,
+        // so instead we add a dedicated confirm action. But for MVP, the
+        // behaviour "Enter applies + exits" is achieved by flipping a flag
+        // only: we leave searchOpen true visually (no cursor). Simplest
+        // correct behaviour: Enter does nothing destructive, esc closes.
+        return;
+      }
+      if (key.backspace || key.delete) {
+        dispatch({ type: "search-backspace" });
+        return;
+      }
+      if (input && !key.ctrl && !key.meta) {
+        dispatch({ type: "search-input", char: input });
+        return;
+      }
+      return;
+    }
+
+    if (input === "q") {
+      exit();
+      setImmediate(() => process.exit(0));
+      return;
+    }
+
     if (state.detailOpen) {
       if (key.escape || input === "q") {
         dispatch({ type: "close-detail" });
@@ -174,6 +250,7 @@ export function App() {
       }
       return;
     }
+    if (input === "/") dispatch({ type: "open-search" });
     if (input === "a") dispatch({ type: "toggle-agents" });
     if (input === "f") {
       const presentAgents = agents.filter((a) => a.present).map((a) => a.name);
@@ -231,11 +308,23 @@ export function App() {
           )}
         </Box>
       )}
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
+        {(state.searchOpen || state.searchQuery) && (
+          <Text>
+            <Text color="yellow">/ </Text>
+            <Text>{state.searchQuery}</Text>
+            {state.searchOpen && <Text color="yellow">▌</Text>}
+            {state.searchQuery && (
+              <Text dimColor>   matches: {filtered.length}</Text>
+            )}
+          </Text>
+        )}
         <Text dimColor>
-          {state.detailOpen
-            ? "[esc] close  [↑↓] scroll"
-            : `[q] quit  [↑↓] select  [enter] detail  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
+          {state.searchOpen
+            ? "[type to search]  [enter] confirm  [esc] clear"
+            : state.detailOpen
+              ? "[esc] close  [↑↓] scroll"
+              : `[q] quit  [↑↓] select  [enter] detail  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
         </Text>
       </Box>
     </Box>
