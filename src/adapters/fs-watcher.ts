@@ -29,6 +29,11 @@ const DEFAULT_IGNORES = [
   /pnpm-lock\.yaml$/,
   /yarn\.lock$/,
   /bun\.lockb$/,
+  // Terminal recording artifacts — asciinema's .cast, ttyrec, etc.
+  /\.cast$/,
+  /\.ttyrec$/,
+  // Our own demo assets — don't surface recording a demo as agent activity
+  /(^|[/\\])docs[/\\]demo\./,
 ];
 
 export function startFsAdapter(root: string, sink: Emit): () => void {
