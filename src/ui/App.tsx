@@ -7,6 +7,7 @@ import { Header } from "./Header.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
+import { startCursorAdapter } from "../adapters/cursor.js";
 import { startFsAdapter } from "../adapters/fs-watcher.js";
 import { detectWorkspaceRoot } from "../util/workspace.js";
 
@@ -66,10 +67,12 @@ export function App() {
       dispatch({ type: "event", event: e });
     const stopClaude = startClaudeAdapter(onEvent);
     const stopOpenClaw = startOpenClawAdapter(onEvent);
+    const stopCursor = startCursorAdapter(workspace, onEvent);
     const stopFs = startFsAdapter(workspace, onEvent);
     return () => {
       stopClaude();
       stopOpenClaw();
+      stopCursor();
       stopFs();
     };
   }, [workspace]);
