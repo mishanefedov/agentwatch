@@ -2,6 +2,7 @@ import chokidar from "chokidar";
 import type { AgentEvent, EventSink } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
+import { wasRecentlyWrittenByAgent } from "../util/recent-writes.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
 
@@ -46,6 +47,9 @@ export function startFsAdapter(root: string, sink: Emit): () => void {
   });
 
   const emitFs = (path: string) => {
+    // Skip paths already attributed to an agent write within the dedupe
+    // window — avoids double-counting Claude's own Edit / Write / MultiEdit.
+    if (wasRecentlyWrittenByAgent(path)) return;
     const event: AgentEvent = {
       id: nextId(),
       ts: new Date().toISOString(),
