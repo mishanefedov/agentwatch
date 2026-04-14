@@ -7,7 +7,8 @@ import { Header } from "./Header.js";
 import { PermissionView, permissionRowCount } from "./PermissionView.js";
 import { EventDetail, totalDetailRows } from "./EventDetail.js";
 import { ProjectsView } from "./ProjectsView.js";
-import { buildProjectIndex } from "../util/project-index.js";
+import { SessionsView, sessionLineCount } from "./SessionsView.js";
+import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
@@ -70,6 +71,12 @@ type State = {
   projectFilter: string | null;
   /** Scroll offset for the permissions view */
   permissionsScroll: number;
+  /** Sessions-list view: project name when open, null when closed */
+  sessionsForProject: string | null;
+  sessionsSelectedIdx: number;
+  sessionsScroll: number;
+  /** Scoped session filter (timeline shows only this sessionId) */
+  sessionFilter: string | null;
 };
 
 type Action =
@@ -95,7 +102,12 @@ type Action =
   | { type: "projects-move"; delta: number; max: number }
   | { type: "projects-select"; name: string }
   | { type: "set-project-filter"; project: string | null }
-  | { type: "scroll-permissions"; delta: number; max: number };
+  | { type: "scroll-permissions"; delta: number; max: number }
+  | { type: "open-sessions"; project: string }
+  | { type: "close-sessions" }
+  | { type: "sessions-move"; delta: number; max: number }
+  | { type: "sessions-scroll"; delta: number; max: number }
+  | { type: "sessions-open-selected"; sessionId: string };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -204,9 +216,10 @@ function reducer(state: State, action: Action): State {
     case "projects-select":
       return {
         ...state,
-        projectFilter: action.name,
+        sessionsForProject: action.name,
+        sessionsSelectedIdx: 0,
+        sessionsScroll: 0,
         projectsOpen: false,
-        selectedIdx: null,
       };
     case "set-project-filter":
       return { ...state, projectFilter: action.project, selectedIdx: null };
@@ -214,6 +227,34 @@ function reducer(state: State, action: Action): State {
       const next = Math.max(0, Math.min(action.max, state.permissionsScroll + action.delta));
       return { ...state, permissionsScroll: next };
     }
+    case "open-sessions":
+      return {
+        ...state,
+        sessionsForProject: action.project,
+        sessionsSelectedIdx: 0,
+        sessionsScroll: 0,
+      };
+    case "close-sessions":
+      return { ...state, sessionsForProject: null };
+    case "sessions-move": {
+      if (action.max <= 0) return state;
+      const next = Math.max(
+        0,
+        Math.min(action.max - 1, state.sessionsSelectedIdx + action.delta),
+      );
+      return { ...state, sessionsSelectedIdx: next };
+    }
+    case "sessions-scroll": {
+      const next = Math.max(0, Math.min(action.max, state.sessionsScroll + action.delta));
+      return { ...state, sessionsScroll: next };
+    }
+    case "sessions-open-selected":
+      return {
+        ...state,
+        sessionFilter: action.sessionId,
+        sessionsForProject: null,
+        selectedIdx: null,
+      };
   }
 }
 
@@ -243,6 +284,10 @@ export function App() {
     projectsSelectedIdx: 0,
     projectFilter: null,
     permissionsScroll: 0,
+    sessionsForProject: null,
+    sessionsSelectedIdx: 0,
+    sessionsScroll: 0,
+    sessionFilter: null,
   });
 
   useEffect(() => {
@@ -280,11 +325,17 @@ export function App() {
         (e.summary ?? "").startsWith(`[${state.projectFilter}`),
       )
     : scoped;
-  const filtered = state.searchQuery
-    ? projectScoped.filter((e) => matchesQuery(e, state.searchQuery))
+  const sessionScoped = state.sessionFilter
+    ? projectScoped.filter((e) => e.sessionId === state.sessionFilter)
     : projectScoped;
+  const filtered = state.searchQuery
+    ? sessionScoped.filter((e) => matchesQuery(e, state.searchQuery))
+    : sessionScoped;
 
   const projects = buildProjectIndex(state.events);
+  const sessionsForOpen = state.sessionsForProject
+    ? buildSessionRows(state.events, state.sessionsForProject)
+    : [];
 
   // Build a parent→child count index for Agent tool_use events
   const childCountByAgentId = new Map<string, number>();
@@ -358,6 +409,42 @@ export function App() {
       return;
     }
 
+    if (state.sessionsForProject) {
+      const lineCount = sessionLineCount(sessionsForOpen);
+      const viewport = Math.max(3, rows - 8);
+      const maxScroll = Math.max(0, lineCount - viewport);
+      if (key.escape) {
+        dispatch({ type: "close-sessions" });
+        dispatch({ type: "toggle-projects" });
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        dispatch({
+          type: "sessions-move",
+          delta: 1,
+          max: sessionsForOpen.length,
+        });
+        dispatch({ type: "sessions-scroll", delta: 1, max: maxScroll });
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        dispatch({
+          type: "sessions-move",
+          delta: -1,
+          max: sessionsForOpen.length,
+        });
+        dispatch({ type: "sessions-scroll", delta: -1, max: maxScroll });
+        return;
+      }
+      if (key.return) {
+        const s = sessionsForOpen[state.sessionsSelectedIdx];
+        if (s)
+          dispatch({ type: "sessions-open-selected", sessionId: s.sessionId });
+        return;
+      }
+      return;
+    }
+
     if (state.showPermissions) {
       const total = permissionRowCount(claudePerms, cursorStatus, openclawCfg);
       const viewport = Math.max(3, rows - 8);
@@ -401,7 +488,9 @@ export function App() {
     }
     if (input === "X") dispatch({ type: "unscope-subagent" });
     if (input === "P") dispatch({ type: "toggle-projects" });
-    if (input === "A") dispatch({ type: "set-project-filter", project: null });
+    if (input === "A") {
+      dispatch({ type: "set-project-filter", project: null });
+    }
     if (input === "a") dispatch({ type: "toggle-agents" });
     if (input === "f") {
       const presentAgents = agents.filter((a) => a.present).map((a) => a.name);
@@ -434,7 +523,15 @@ export function App() {
         filter={state.filterAgent}
         paused={state.paused}
       />
-      {state.projectsOpen ? (
+      {state.sessionsForProject ? (
+        <SessionsView
+          project={state.sessionsForProject}
+          sessions={sessionsForOpen}
+          selectedIdx={state.sessionsSelectedIdx}
+          viewportRows={Math.max(3, rows - 8)}
+          scrollOffset={state.sessionsScroll}
+        />
+      ) : state.projectsOpen ? (
         <ProjectsView
           projects={projects}
           selectedIdx={state.projectsSelectedIdx}
@@ -472,6 +569,13 @@ export function App() {
         </Box>
       )}
       <Box marginTop={1} flexDirection="column">
+        {state.sessionFilter && (
+          <Text>
+            <Text color="yellow">↳ session </Text>
+            <Text bold>{state.sessionFilter.slice(0, 16)}</Text>
+            <Text dimColor>   (A to clear)</Text>
+          </Text>
+        )}
         {state.projectFilter && (
           <Text>
             <Text color="yellow">↳ project </Text>
@@ -499,9 +603,11 @@ export function App() {
         <Text dimColor>
           {state.searchOpen
             ? "[type to search]  [enter] confirm  [esc] clear"
-            : state.projectsOpen
-              ? "[↑↓] select project  [enter] filter  [esc] close"
-              : state.detailOpen
+            : state.sessionsForProject
+              ? "[↑↓] select session  [enter] open  [esc] back to projects"
+              : state.projectsOpen
+                ? "[↑↓] select project  [enter] sessions  [esc] close"
+                : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
                 : `[q] quit  [↑↓] select  [enter] detail  [P] projects  [x] subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
         </Text>
