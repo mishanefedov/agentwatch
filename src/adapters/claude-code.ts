@@ -124,101 +124,165 @@ export function translateClaudeLine(
   const ts =
     (typeof o.timestamp === "string" && o.timestamp) ||
     new Date().toISOString();
-
-  // Claude Code jsonl entries vary. Common shapes: user/assistant messages,
-  // tool_use, tool_result. We extract the signal that matters.
-  const type = detectType(o);
-  if (!type) return null;
-
-  const { path, cmd, tool, summary } = extractFields(o);
   const prefix = project ? `[${project}] ` : "";
 
-  return {
-    id: nextId(),
-    ts,
-    agent: "claude-code",
-    type,
-    path,
-    cmd,
-    tool,
-    summary: summary ? prefix + summary : prefix + type,
-    sessionId,
-    riskScore: riskOf(type, path, cmd),
-  };
-}
-
-function detectType(o: Record<string, unknown>): EventType | null {
   const role = o.role ?? (o.message as Record<string, unknown> | undefined)?.role;
   const type = o.type;
+  const content = (o.message as Record<string, unknown> | undefined)?.content;
 
-  if (type === "user" || role === "user") return "prompt";
+  // Suppress obvious noise
+  if (type === "tool_result" || type === "summary") return null;
+  if (type === "worktree-state" || type === "compact") return null;
+
+  // Assistant tool use — the real interesting signal. Walk content[] for
+  // tool_use blocks and surface the tool name + command / path.
   if (type === "assistant" || role === "assistant") {
-    if (hasToolUse(o)) return "tool_call";
-    return "response";
+    const toolUse = findToolUse(content);
+    if (toolUse) {
+      const evType = inferToolType(toolUse.name);
+      const summary = buildToolSummary(toolUse);
+      return {
+        id: nextId(),
+        ts,
+        agent: "claude-code",
+        type: evType,
+        path: toolUse.path,
+        cmd: toolUse.cmd,
+        tool: toolUse.name,
+        summary: prefix + summary,
+        sessionId,
+        riskScore: riskOf(evType, toolUse.path, toolUse.cmd),
+      };
+    }
+    const text = extractText(content);
+    if (!text) return null; // suppress empty assistant messages
+    return {
+      id: nextId(),
+      ts,
+      agent: "claude-code",
+      type: "response",
+      summary: prefix + truncate(text),
+      sessionId,
+      riskScore: riskOf("response"),
+    };
   }
-  if (type === "tool_use") return inferToolType(o);
-  if (type === "tool_result") return null; // suppress noise; tool_use covered it
-  if (type === "summary") return null;
+
+  if (type === "user" || role === "user") {
+    const text = extractUserText(content);
+    if (!text) return null; // suppress tool_result-only user turns
+    return {
+      id: nextId(),
+      ts,
+      agent: "claude-code",
+      type: "prompt",
+      summary: prefix + truncate(text),
+      sessionId,
+      riskScore: riskOf("prompt"),
+    };
+  }
+
   return null;
 }
 
-function hasToolUse(o: Record<string, unknown>): boolean {
-  const msg = o.message as Record<string, unknown> | undefined;
-  const content = msg?.content;
-  if (Array.isArray(content)) {
-    return content.some(
-      (c: unknown) =>
-        typeof c === "object" && c !== null && (c as { type?: string }).type === "tool_use",
-    );
-  }
-  return false;
+interface ToolUse {
+  name: string;
+  path?: string;
+  cmd?: string;
+  input: Record<string, unknown>;
 }
 
-function inferToolType(o: Record<string, unknown>): EventType {
-  const name = typeof o.name === "string" ? o.name : "";
+function findToolUse(content: unknown): ToolUse | null {
+  if (!Array.isArray(content)) return null;
+  for (const c of content) {
+    if (typeof c !== "object" || c === null) continue;
+    const rec = c as Record<string, unknown>;
+    if (rec.type !== "tool_use") continue;
+    const name = typeof rec.name === "string" ? rec.name : "unknown";
+    const input = (rec.input ?? {}) as Record<string, unknown>;
+    const path =
+      typeof input.file_path === "string"
+        ? input.file_path
+        : typeof input.path === "string"
+          ? input.path
+          : undefined;
+    const cmd = typeof input.command === "string" ? input.command : undefined;
+    return { name, path, cmd, input };
+  }
+  return null;
+}
+
+function buildToolSummary(t: ToolUse): string {
+  // Prefer cmd for shell, path for file ops, a one-line arg summary otherwise.
+  if (/^Bash/i.test(t.name) && t.cmd) return `Bash: ${truncate(t.cmd, 100)}`;
+  if (/^(Write|Edit|MultiEdit|Read)/i.test(t.name) && t.path) {
+    return `${t.name}: ${t.path}`;
+  }
+  if (/^(Grep|Glob)/i.test(t.name)) {
+    const pat =
+      typeof t.input.pattern === "string"
+        ? t.input.pattern
+        : typeof t.input.glob === "string"
+          ? t.input.glob
+          : "";
+    return `${t.name}: ${truncate(pat, 100)}`;
+  }
+  if (/^Task/i.test(t.name)) {
+    const desc =
+      typeof t.input.description === "string" ? t.input.description : "";
+    return `Task: ${truncate(desc, 100)}`;
+  }
+  if (/^WebFetch/i.test(t.name)) {
+    const url = typeof t.input.url === "string" ? t.input.url : "";
+    return `WebFetch: ${url}`;
+  }
+  // Fallback: tool name + first scalar input value
+  const firstVal = Object.values(t.input).find(
+    (v): v is string => typeof v === "string",
+  );
+  return firstVal ? `${t.name}: ${truncate(firstVal, 100)}` : t.name;
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const c of content) {
+    if (typeof c !== "object" || c === null) continue;
+    const rec = c as Record<string, unknown>;
+    if (rec.type === "text" && typeof rec.text === "string") {
+      parts.push(rec.text);
+    } else if (rec.type === "thinking" && typeof rec.thinking === "string") {
+      parts.push(rec.thinking);
+    }
+  }
+  return parts.join(" ").trim();
+}
+
+function extractUserText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const c of content) {
+    if (typeof c !== "object" || c === null) continue;
+    const rec = c as Record<string, unknown>;
+    if (rec.type === "text" && typeof rec.text === "string") {
+      parts.push(rec.text);
+    }
+    // tool_result blocks: skip — these are noise from the user's POV
+  }
+  return parts.join(" ").trim();
+}
+
+function inferToolType(name: string): EventType {
   if (/^Bash/i.test(name)) return "shell_exec";
-  if (/^Read/i.test(name)) return "file_read";
+  if (/^(Read|Grep|Glob)/i.test(name)) return "file_read";
   if (/^(Write|Edit|MultiEdit)/i.test(name)) return "file_write";
   return "tool_call";
 }
 
-function extractFields(o: Record<string, unknown>): {
-  path?: string;
-  cmd?: string;
-  tool?: string;
-  summary?: string;
-} {
-  const name = typeof o.name === "string" ? o.name : undefined;
-  const input = (o.input ?? {}) as Record<string, unknown>;
-  const path =
-    typeof input.file_path === "string"
-      ? input.file_path
-      : typeof input.path === "string"
-        ? input.path
-        : undefined;
-  const cmd = typeof input.command === "string" ? input.command : undefined;
-
-  let summary: string | undefined;
-  const msg = o.message as Record<string, unknown> | undefined;
-  const content = msg?.content;
-  if (typeof content === "string") {
-    summary = truncate(content);
-  } else if (Array.isArray(content)) {
-    const text = content
-      .filter((c: unknown): c is { type: string; text: string } =>
-        typeof c === "object" && c !== null && (c as { type?: string }).type === "text",
-      )
-      .map((c) => c.text)
-      .join(" ");
-    if (text) summary = truncate(text);
-  }
-  if (!summary && cmd) summary = truncate(cmd);
-  if (!summary && path) summary = path;
-
-  return { path, cmd, tool: name, summary };
-}
-
-function truncate(s: string, max = 120): string {
+function truncate(s: string, max = 140): string {
   const clean = s.replace(/\s+/g, " ").trim();
+  if (!clean) return "";
   return clean.length <= max ? clean : clean.slice(0, max - 1) + "…";
 }
+
