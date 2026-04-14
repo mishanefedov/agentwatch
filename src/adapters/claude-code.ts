@@ -1,7 +1,7 @@
 import chokidar from "chokidar";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { basename } from "node:path";
+import { basename, sep } from "node:path";
 import type { AgentEvent, EventType } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { claudeProjectsDir } from "../util/workspace.js";
@@ -11,8 +11,9 @@ type Emit = (e: AgentEvent) => void;
 
 interface FileCursor {
   offset: number;
-  buffer: string;
 }
+
+const BACKFILL_BYTES = 64 * 1024;
 
 export function startClaudeAdapter(emit: Emit): () => void {
   const dir = claudeProjectsDir();
@@ -21,40 +22,49 @@ export function startClaudeAdapter(emit: Emit): () => void {
   }
 
   const cursors = new Map<string, FileCursor>();
-
-  const watcher = chokidar.watch(`${dir}/**/*.jsonl`, {
+  // chokidar v4 dropped glob support; watch the projects dir recursively
+  // and filter by path regex.
+  const sessionRe = /[\\/]projects[\\/][^\\/]+[\\/][^\\/]+\.jsonl$/;
+  const watcher = chokidar.watch(dir, {
     persistent: true,
     ignoreInitial: false,
-    awaitWriteFinish: false,
+    depth: 3,
   });
 
-  const process = (file: string, startFromEnd: boolean) => {
+  const process = (file: string, isInitialAdd: boolean) => {
+    if (!sessionRe.test(file)) return;
+    const size = safeSize(file);
     let cursor = cursors.get(file);
     if (!cursor) {
-      const size = safeSize(file);
-      cursor = { offset: startFromEnd ? size : 0, buffer: "" };
+      const start = isInitialAdd ? Math.max(0, size - BACKFILL_BYTES) : size;
+      cursor = { offset: start };
       cursors.set(file, cursor);
-      if (startFromEnd) return;
     }
-    const size = safeSize(file);
     if (size <= cursor.offset) return;
 
+    const start = cursor.offset;
     const stream = createReadStream(file, {
-      start: cursor.offset,
+      start,
       end: size - 1,
       encoding: "utf8",
     });
 
     const sessionId = basename(file, ".jsonl");
+    const project = extractProject(file);
     let consumed = 0;
+    let skippedFirst = false;
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
     rl.on("line", (line) => {
       consumed += Buffer.byteLength(line, "utf8") + 1;
+      if (isInitialAdd && start > 0 && !skippedFirst) {
+        skippedFirst = true;
+        return;
+      }
       if (!line.trim()) return;
       try {
         const obj = JSON.parse(line);
-        const event = translateClaudeLine(obj, sessionId);
+        const event = translateClaudeLine(obj, sessionId, project);
         if (event) emit(event);
       } catch {
         // ignore malformed lines
@@ -62,7 +72,7 @@ export function startClaudeAdapter(emit: Emit): () => void {
     });
 
     rl.on("close", () => {
-      cursor!.offset += consumed;
+      cursor!.offset = start + consumed;
     });
   };
 
@@ -82,6 +92,20 @@ export function startClaudeAdapter(emit: Emit): () => void {
   };
 }
 
+/** Claude stores session files under ~/.claude/projects/<escaped-path>/<id>.jsonl
+ *  where the escaped path replaces `/` with `-`. We return the last segment
+ *  (e.g. `-Users-foo-IdeaProjects-auraqu` → `auraqu`). */
+function extractProject(file: string): string {
+  const parts = file.split(sep);
+  const projIdx = parts.lastIndexOf("projects");
+  if (projIdx >= 0 && parts[projIdx + 1]) {
+    const dir = parts[projIdx + 1]!;
+    const segs = dir.split("-").filter(Boolean);
+    return segs[segs.length - 1] ?? dir;
+  }
+  return "";
+}
+
 function safeSize(file: string): number {
   try {
     return statSync(file).size;
@@ -93,6 +117,7 @@ function safeSize(file: string): number {
 export function translateClaudeLine(
   obj: unknown,
   sessionId: string,
+  project: string = "",
 ): AgentEvent | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
@@ -106,6 +131,7 @@ export function translateClaudeLine(
   if (!type) return null;
 
   const { path, cmd, tool, summary } = extractFields(o);
+  const prefix = project ? `[${project}] ` : "";
 
   return {
     id: nextId(),
@@ -115,7 +141,7 @@ export function translateClaudeLine(
     path,
     cmd,
     tool,
-    summary,
+    summary: summary ? prefix + summary : prefix + type,
     sessionId,
     riskScore: riskOf(type, path, cmd),
   };
