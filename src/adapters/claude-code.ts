@@ -6,6 +6,7 @@ import type { AgentEvent, EventType } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { claudeProjectsDir } from "../util/workspace.js";
 import { nextId } from "../util/ids.js";
+import { costOf, parseUsage } from "../util/cost.js";
 
 type Emit = (e: AgentEvent) => void;
 
@@ -152,6 +153,11 @@ export function translateClaudeLine(
   // Assistant tool use — the real interesting signal. Walk content[] for
   // tool_use blocks and surface the tool name + command / path.
   if (type === "assistant" || role === "assistant") {
+    const msg = o.message as Record<string, unknown> | undefined;
+    const model = typeof msg?.model === "string" ? msg.model : "default";
+    const usage = parseUsage(msg?.usage) ?? undefined;
+    const cost = usage ? costOf(model, usage) : undefined;
+
     const toolUse = findToolUse(content);
     if (toolUse) {
       const evType = inferToolType(toolUse.name);
@@ -171,12 +177,15 @@ export function translateClaudeLine(
           toolInput: toolUse.input,
           toolUseId: toolUse.id,
           thinking: extractThinking(content),
+          usage,
+          cost,
+          model,
         },
       };
     }
     const text = extractText(content);
     const thinking = extractThinking(content);
-    if (!text && !thinking) return null; // suppress empty assistant messages
+    if (!text && !thinking) return null;
     return {
       id: nextId(),
       ts,
@@ -188,6 +197,9 @@ export function translateClaudeLine(
       details: {
         fullText: text || undefined,
         thinking: thinking || undefined,
+        usage,
+        cost,
+        model,
       },
     };
   }

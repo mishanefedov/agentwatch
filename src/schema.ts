@@ -29,6 +29,17 @@ export interface EventDetails {
   toolUseId?: string;
   /** Full project/session path of the originating file. */
   source?: string;
+  /** Token usage from an assistant turn (input / cache / output). */
+  usage?: {
+    input: number;
+    cacheCreate: number;
+    cacheRead: number;
+    output: number;
+  };
+  /** Computed USD cost for this turn. */
+  cost?: number;
+  /** Model id that produced this event. */
+  model?: string;
 }
 
 export interface AgentEvent {
