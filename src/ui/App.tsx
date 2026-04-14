@@ -58,6 +58,9 @@ type State = {
   detailScroll: number;
   searchOpen: boolean;
   searchQuery: string;
+  /** When set, timeline is scoped to events whose sessionId ends with
+   *  `agent-<subAgentScope>` OR whose details.subAgentId === scope. */
+  subAgentScope: string | null;
 };
 
 type Action =
@@ -75,7 +78,9 @@ type Action =
   | { type: "open-search" }
   | { type: "close-search" }
   | { type: "search-input"; char: string }
-  | { type: "search-backspace" };
+  | { type: "search-backspace" }
+  | { type: "scope-subagent"; subAgentId: string }
+  | { type: "unscope-subagent" };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -149,6 +154,15 @@ function reducer(state: State, action: Action): State {
         searchQuery: state.searchQuery.slice(0, -1),
         selectedIdx: null,
       };
+    case "scope-subagent":
+      return {
+        ...state,
+        subAgentScope: action.subAgentId,
+        selectedIdx: null,
+        detailOpen: false,
+      };
+    case "unscope-subagent":
+      return { ...state, subAgentScope: null, selectedIdx: null };
   }
 }
 
@@ -173,6 +187,7 @@ export function App() {
     detailScroll: 0,
     searchOpen: false,
     searchQuery: "",
+    subAgentScope: null,
   });
 
   useEffect(() => {
@@ -197,9 +212,26 @@ export function App() {
   const agentFiltered = state.filterAgent
     ? state.events.filter((e) => e.agent === state.filterAgent)
     : state.events;
-  const filtered = state.searchQuery
-    ? agentFiltered.filter((e) => matchesQuery(e, state.searchQuery))
+  const scoped = state.subAgentScope
+    ? agentFiltered.filter(
+        (e) =>
+          e.sessionId === `agent-${state.subAgentScope}` ||
+          e.sessionId === state.subAgentScope ||
+          e.details?.subAgentId === state.subAgentScope,
+      )
     : agentFiltered;
+  const filtered = state.searchQuery
+    ? scoped.filter((e) => matchesQuery(e, state.searchQuery))
+    : scoped;
+
+  // Build a parent→child count index for Agent tool_use events
+  const childCountByAgentId = new Map<string, number>();
+  for (const e of state.events) {
+    if (e.sessionId?.startsWith("agent-")) {
+      const aid = e.sessionId.slice("agent-".length);
+      childCountByAgentId.set(aid, (childCountByAgentId.get(aid) ?? 0) + 1);
+    }
+  }
 
   const cols = stdout.columns || 120;
   const rows = stdout.rows || 30;
@@ -265,6 +297,12 @@ export function App() {
       return;
     }
     if (input === "/") dispatch({ type: "open-search" });
+    if (input === "x" && state.selectedIdx !== null) {
+      const ev = filtered[state.selectedIdx];
+      const sid = ev?.details?.subAgentId;
+      if (sid) dispatch({ type: "scope-subagent", subAgentId: sid });
+    }
+    if (input === "X") dispatch({ type: "unscope-subagent" });
     if (input === "a") dispatch({ type: "toggle-agents" });
     if (input === "f") {
       const presentAgents = agents.filter((a) => a.present).map((a) => a.name);
@@ -313,7 +351,11 @@ export function App() {
       ) : (
         <Box flexDirection="row">
           <Box flexGrow={1} flexDirection="column">
-            <Timeline events={filtered} selectedIdx={state.selectedIdx} />
+            <Timeline
+              events={filtered}
+              selectedIdx={state.selectedIdx}
+              childCountByAgentId={childCountByAgentId}
+            />
           </Box>
           {state.showAgents && (
             <Box width={32} marginLeft={1}>
@@ -323,6 +365,13 @@ export function App() {
         </Box>
       )}
       <Box marginTop={1} flexDirection="column">
+        {state.subAgentScope && (
+          <Text>
+            <Text color="yellow">↳ scoped to subagent </Text>
+            <Text bold>{state.subAgentScope.slice(0, 12)}</Text>
+            <Text dimColor>   (X to unscope)</Text>
+          </Text>
+        )}
         {(state.searchOpen || state.searchQuery) && (
           <Text>
             <Text color="yellow">/ </Text>
@@ -338,7 +387,7 @@ export function App() {
             ? "[type to search]  [enter] confirm  [esc] clear"
             : state.detailOpen
               ? "[esc] close  [↑↓] scroll"
-              : `[q] quit  [↑↓] select  [enter] detail  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
+              : `[q] quit  [↑↓] select  [enter] detail  [x] drill subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
         </Text>
       </Box>
     </Box>
