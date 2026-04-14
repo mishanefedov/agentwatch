@@ -1,7 +1,6 @@
 import { Box, Text } from "ink";
 import type { AgentEvent } from "../schema.js";
 import type { DetectedAgent } from "../adapters/detect.js";
-import { formatUSD } from "../util/cost.js";
 
 interface Props {
   agents: DetectedAgent[];
@@ -16,10 +15,6 @@ export function AgentPanel({ agents, events }: Props) {
         const forAgent = events.filter((e) => e.agent === a.name);
         const count = forAgent.length;
         const last = forAgent[0];
-        const cost = forAgent.reduce(
-          (acc, e) => acc + (e.details?.cost ?? 0),
-          0,
-        );
         const dotColor = !a.present
           ? "gray"
           : a.instrumented
@@ -37,17 +32,10 @@ export function AgentPanel({ agents, events }: Props) {
             </Text>
             <Text dimColor>  {statusLabel}</Text>
             {a.present && a.instrumented && (
-              <>
-                <Text dimColor>
-                  {"  "}events: {count}
-                  {last ? `, last ${last.ts.slice(11, 19)}` : ""}
-                </Text>
-                {cost > 0 && (
-                  <Text dimColor>
-                    {"  "}cost: <Text color="yellow">{formatUSD(cost)}</Text>
-                  </Text>
-                )}
-              </>
+              <Text dimColor>
+                {"  "}events: {count}
+                {last ? `, last ${last.ts.slice(11, 19)}` : ""}
+              </Text>
             )}
           </Box>
         );
