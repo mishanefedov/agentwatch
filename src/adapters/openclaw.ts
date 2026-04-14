@@ -13,6 +13,11 @@ interface FileCursor {
   offset: number;
 }
 
+// Shared across adapter lifetime: session_start entries tell us the cwd,
+// later messages in the same session inherit it so we can tag events
+// with a project label.
+const sessionCwd = new Map<string, string>();
+
 export function startOpenClawAdapter(emit: Emit): () => void {
   const root = join(homedir(), ".openclaw");
   if (!existsSync(root)) return () => {};
@@ -173,22 +178,35 @@ export function translateSession(
     new Date().toISOString();
   const t = o.type;
 
+  const projectLabel = () => {
+    const cwd = sessionCwd.get(sessionId);
+    if (!cwd) return "";
+    const b = cwd.split("/").filter(Boolean).pop();
+    return b ? `[${b}] ` : "";
+  };
+
   const base = (
     type: EventType,
     fields: Partial<AgentEvent> = {},
-  ): AgentEvent => ({
-    id: nextId(),
-    ts,
-    agent: "openclaw",
-    type,
-    tool: `openclaw:${subAgent}`,
-    sessionId,
-    riskScore: riskOf(type, fields.path, fields.cmd),
-    ...fields,
-  });
+  ): AgentEvent => {
+    const prefix = projectLabel();
+    const rawSummary = fields.summary ?? "";
+    return {
+      id: nextId(),
+      ts,
+      agent: "openclaw",
+      type,
+      tool: `openclaw:${subAgent}`,
+      sessionId,
+      riskScore: riskOf(type, fields.path, fields.cmd),
+      ...fields,
+      summary: rawSummary ? prefix + rawSummary : prefix + type,
+    };
+  };
 
   if (t === "session") {
     const cwd = typeof o.cwd === "string" ? o.cwd : undefined;
+    if (cwd) sessionCwd.set(sessionId, cwd);
     return base("session_start", {
       path: cwd,
       summary: `openclaw/${subAgent} session started${cwd ? ` in ${cwd}` : ""}`,

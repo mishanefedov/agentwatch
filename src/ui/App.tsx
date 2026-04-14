@@ -75,12 +75,12 @@ export function App() {
       dispatch({ type: "event", event: e });
     const stopClaude = startClaudeAdapter(onEvent);
     const stopOpenClaw = startOpenClawAdapter(onEvent);
-    const stopCursor = startCursorAdapter(workspace, onEvent);
+    const cursor = startCursorAdapter(workspace, onEvent);
     const stopFs = startFsAdapter(workspace, onEvent);
     return () => {
       stopClaude();
       stopOpenClaw();
-      stopCursor();
+      cursor.stop();
       stopFs();
     };
   }, [workspace]);

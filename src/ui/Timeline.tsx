@@ -32,10 +32,12 @@ function EventRow({ event }: { event: AgentEvent }) {
   const line = event.summary ?? event.path ?? event.cmd ?? event.tool ?? event.type;
   return (
     <Box>
-      <Text dimColor>{time} </Text>
-      <Text color={agentColor(event.agent)}>{pad(event.agent, 12)} </Text>
-      <Text color={riskColor(event.riskScore)}>{pad(event.type, 12)} </Text>
-      <Text>{truncate(line, 100)}</Text>
+      <Text wrap="truncate">
+        <Text dimColor>{time} </Text>
+        <Text color={agentColor(event.agent)}>{pad(event.agent, 10)} </Text>
+        <Text color={riskColor(event.riskScore)}>{pad(event.type, 13)} </Text>
+        <Text>{line}</Text>
+      </Text>
     </Box>
   );
 }
@@ -61,9 +63,5 @@ function riskColor(r: number): string {
 function pad(s: string, n: number): string {
   if (s.length >= n) return s.slice(0, n);
   return s + " ".repeat(n - s.length);
-}
-
-function truncate(s: string, n: number): string {
-  return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
