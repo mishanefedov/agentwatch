@@ -228,7 +228,10 @@ export function translateSession(
     const content = msg?.content;
     const text = extractText(content);
     if (role === "user") {
-      return base("prompt", { summary: truncate(text) });
+      return base("prompt", {
+        summary: truncate(text),
+        details: { fullText: text },
+      });
     }
     if (role === "assistant") {
       const toolUse = extractToolUse(content);
@@ -239,10 +242,14 @@ export function translateSession(
           path: toolUse.path,
           cmd: toolUse.cmd,
           summary: truncate(toolUse.summary),
+          details: { toolInput: toolUse.input },
         });
       }
       if (!text) return null; // suppress empty assistant messages
-      return base("response", { summary: truncate(text) });
+      return base("response", {
+        summary: truncate(text),
+        details: { fullText: text },
+      });
     }
   }
 
@@ -293,6 +300,7 @@ interface ToolUse {
   path?: string;
   cmd?: string;
   summary: string;
+  input: Record<string, unknown>;
 }
 
 function extractToolUse(content: unknown): ToolUse | null {
@@ -314,7 +322,7 @@ function extractToolUse(content: unknown): ToolUse | null {
             : undefined;
       const cmd = typeof input.command === "string" ? input.command : undefined;
       const summary = cmd ?? path ?? name;
-      return { name, path, cmd, summary };
+      return { name, path, cmd, summary, input };
     }
   }
   return null;

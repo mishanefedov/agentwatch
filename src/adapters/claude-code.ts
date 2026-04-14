@@ -167,18 +167,28 @@ export function translateClaudeLine(
         summary: prefix + summary,
         sessionId,
         riskScore: riskOf(evType, toolUse.path, toolUse.cmd),
+        details: {
+          toolInput: toolUse.input,
+          toolUseId: toolUse.id,
+          thinking: extractThinking(content),
+        },
       };
     }
     const text = extractText(content);
-    if (!text) return null; // suppress empty assistant messages
+    const thinking = extractThinking(content);
+    if (!text && !thinking) return null; // suppress empty assistant messages
     return {
       id: nextId(),
       ts,
       agent: "claude-code",
       type: "response",
-      summary: prefix + truncate(text),
+      summary: prefix + truncate(text || thinking || ""),
       sessionId,
       riskScore: riskOf("response"),
+      details: {
+        fullText: text || undefined,
+        thinking: thinking || undefined,
+      },
     };
   }
 
@@ -193,6 +203,7 @@ export function translateClaudeLine(
       summary: prefix + truncate(text),
       sessionId,
       riskScore: riskOf("prompt"),
+      details: { fullText: text },
     };
   }
 
@@ -204,6 +215,7 @@ interface ToolUse {
   path?: string;
   cmd?: string;
   input: Record<string, unknown>;
+  id?: string;
 }
 
 function findToolUse(content: unknown): ToolUse | null {
@@ -213,6 +225,7 @@ function findToolUse(content: unknown): ToolUse | null {
     const rec = c as Record<string, unknown>;
     if (rec.type !== "tool_use") continue;
     const name = typeof rec.name === "string" ? rec.name : "unknown";
+    const id = typeof rec.id === "string" ? rec.id : undefined;
     const input = (rec.input ?? {}) as Record<string, unknown>;
     const path =
       typeof input.file_path === "string"
@@ -221,9 +234,22 @@ function findToolUse(content: unknown): ToolUse | null {
           ? input.path
           : undefined;
     const cmd = typeof input.command === "string" ? input.command : undefined;
-    return { name, path, cmd, input };
+    return { name, path, cmd, input, id };
   }
   return null;
+}
+
+function extractThinking(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const c of content) {
+    if (typeof c !== "object" || c === null) continue;
+    const rec = c as Record<string, unknown>;
+    if (rec.type === "thinking" && typeof rec.thinking === "string") {
+      parts.push(rec.thinking);
+    }
+  }
+  return parts.join("\n").trim();
 }
 
 function buildToolSummary(t: ToolUse): string {

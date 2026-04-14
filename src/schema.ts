@@ -17,6 +17,20 @@ export type EventType =
   | "session_start"
   | "session_end";
 
+export interface EventDetails {
+  /** Full prompt or response text, untruncated. */
+  fullText?: string;
+  /** Extended-thinking block content if present. */
+  thinking?: string;
+  /** Full tool_use input object for tool_call / shell_exec / file_* events. */
+  toolInput?: Record<string, unknown>;
+  /** Matches the tool_use_id in the jsonl so downstream correlators can
+   *  pair this event with its tool_result. */
+  toolUseId?: string;
+  /** Full project/session path of the originating file. */
+  source?: string;
+}
+
 export interface AgentEvent {
   id: string;
   ts: string;
@@ -29,6 +43,7 @@ export interface AgentEvent {
   promptId?: string;
   sessionId?: string;
   riskScore: number;
+  details?: EventDetails;
 }
 
 export function riskOf(type: EventType, path?: string, cmd?: string): number {
