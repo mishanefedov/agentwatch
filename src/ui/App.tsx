@@ -11,6 +11,7 @@ import { SessionsView, sessionLineCount } from "./SessionsView.js";
 import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
 import { notify, shouldNotify } from "../util/notifier.js";
+import { HelpView } from "./HelpView.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
@@ -81,6 +82,7 @@ type State = {
   sessionFilter: string | null;
   /** Transient message shown at the footer for ~2s (e.g. after a yank). */
   flashMessage: string | null;
+  showHelp: boolean;
 };
 
 type Action =
@@ -109,6 +111,7 @@ type Action =
   | { type: "scroll-permissions"; delta: number; max: number }
   | { type: "flash"; text: string }
   | { type: "flash-clear" }
+  | { type: "toggle-help" }
   | { type: "open-sessions"; project: string }
   | { type: "close-sessions" }
   | { type: "sessions-move"; delta: number; max: number }
@@ -265,6 +268,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, flashMessage: action.text };
     case "flash-clear":
       return { ...state, flashMessage: null };
+    case "toggle-help":
+      return { ...state, showHelp: !state.showHelp };
   }
 }
 
@@ -299,6 +304,7 @@ export function App() {
     sessionsScroll: 0,
     sessionFilter: null,
     flashMessage: null,
+    showHelp: false,
   });
 
   useEffect(() => {
@@ -565,7 +571,9 @@ export function App() {
         filter={state.filterAgent}
         paused={state.paused}
       />
-      {state.sessionsForProject ? (
+      {state.showHelp ? (
+        <HelpView />
+      ) : state.sessionsForProject ? (
         <SessionsView
           project={state.sessionsForProject}
           sessions={sessionsForOpen}
@@ -656,7 +664,7 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[q] quit  [↑↓] select  [enter] detail  [y] yank  [P] projects  [x] subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
+                : `[?] help  [q] quit  [↑↓] select  [enter] detail  [y] yank  [P] projects  [x] subagent  [/] search  [p] permissions  [space] ${state.paused ? "resume" : "pause"}`}
         </Text>
       </Box>
     </Box>
