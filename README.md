@@ -13,11 +13,13 @@ You're running Claude Code + Cursor + OpenClaw on the same machine. Each has its
 ## Install
 
 ```bash
-npm i -g agentwatch
+npm i -g @misha_misha/agentwatch
 agentwatch
 ```
 
-That's it. No config, no accounts, no daemon.
+That's it. No config, no accounts, no daemon. (Published under a
+scope because `agentwatch` was blocked by npm's anti-typosquatting
+check — the binary is still `agentwatch`.)
 
 Requires Node ≥ 20. Works on macOS and Linux.
 
