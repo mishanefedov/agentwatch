@@ -93,25 +93,27 @@ function projectOf(event: AgentEvent): string | undefined {
 export function notify(title: string, body: string): void {
   if (notifierDisabled) return;
   const os = platform();
+  // Ink raw-mode TTY breaks inherited stdio on child processes; always
+  // use explicit ignore stdio so the notifier never clobbers our TUI.
+  const silentStdio = { stdio: ["ignore", "ignore", "ignore"] as const };
   try {
     if (os === "darwin") {
-      // osascript requires escaping. Use single-line display notification.
       const escTitle = title.replace(/"/g, '\\"');
       const escBody = body.replace(/"/g, '\\"');
-      spawnSync("osascript", [
-        "-e",
-        `display notification "${escBody}" with title "${escTitle}"`,
-      ]);
+      spawnSync(
+        "osascript",
+        ["-e", `display notification "${escBody}" with title "${escTitle}"`],
+        silentStdio,
+      );
       return;
     }
     if (os === "linux") {
-      spawnSync("notify-send", [title, body]);
+      spawnSync("notify-send", [title, body], silentStdio);
       return;
     }
     if (os === "win32") {
-      // Minimal PowerShell toast; silent fallback if Windows Shell APIs fail.
       const msg = `[System.Windows.Forms.MessageBox]::Show('${body.replace(/'/g, "''")}', '${title.replace(/'/g, "''")}')`;
-      spawnSync("powershell", ["-Command", msg]);
+      spawnSync("powershell", ["-Command", msg], silentStdio);
       return;
     }
   } catch {
