@@ -8,6 +8,8 @@ interface Props {
   paused: boolean;
 }
 
+export type { Props as HeaderProps };
+
 export function Header({ workspace, eventCount, filter, paused }: Props) {
   return (
     <Box flexDirection="row" justifyContent="space-between" marginBottom={1}>

@@ -12,6 +12,7 @@ import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
 import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
+import { Breadcrumb } from "./Breadcrumb.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
@@ -112,11 +113,14 @@ type Action =
   | { type: "flash"; text: string }
   | { type: "flash-clear" }
   | { type: "toggle-help" }
+  | { type: "home" }
+  | { type: "back" }
   | { type: "open-sessions"; project: string }
   | { type: "close-sessions" }
   | { type: "sessions-move"; delta: number; max: number }
   | { type: "sessions-scroll"; delta: number; max: number }
-  | { type: "sessions-open-selected"; sessionId: string };
+  | { type: "sessions-open-selected"; sessionId: string }
+  | { type: "clear-filters" };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -270,6 +274,58 @@ function reducer(state: State, action: Action): State {
       return { ...state, flashMessage: null };
     case "toggle-help":
       return { ...state, showHelp: !state.showHelp };
+    case "home":
+      // Reset every view / filter / scope back to the default timeline
+      return {
+        ...state,
+        showHelp: false,
+        showPermissions: false,
+        detailOpen: false,
+        projectsOpen: false,
+        sessionsForProject: null,
+        projectFilter: null,
+        sessionFilter: null,
+        subAgentScope: null,
+        filterAgent: null,
+        searchQuery: "",
+        searchOpen: false,
+        selectedIdx: null,
+        detailScroll: 0,
+        permissionsScroll: 0,
+        sessionsScroll: 0,
+      };
+    case "clear-filters":
+      return {
+        ...state,
+        projectFilter: null,
+        sessionFilter: null,
+        subAgentScope: null,
+        filterAgent: null,
+        searchQuery: "",
+        selectedIdx: null,
+      };
+    case "back": {
+      // esc semantics: close the deepest active modal / scope
+      if (state.showHelp) return { ...state, showHelp: false };
+      if (state.detailOpen) return { ...state, detailOpen: false, detailScroll: 0 };
+      if (state.showPermissions)
+        return { ...state, showPermissions: false, permissionsScroll: 0 };
+      if (state.sessionsForProject)
+        return { ...state, sessionsForProject: null, projectsOpen: true };
+      if (state.projectsOpen) return { ...state, projectsOpen: false };
+      if (state.subAgentScope)
+        return { ...state, subAgentScope: null, selectedIdx: null };
+      if (state.sessionFilter)
+        return { ...state, sessionFilter: null, selectedIdx: null };
+      if (state.projectFilter)
+        return { ...state, projectFilter: null, selectedIdx: null };
+      if (state.filterAgent)
+        return { ...state, filterAgent: null, selectedIdx: null };
+      if (state.searchQuery)
+        return { ...state, searchQuery: "", selectedIdx: null };
+      if (state.selectedIdx !== null) return { ...state, selectedIdx: null };
+      return state;
+    }
   }
 }
 
@@ -418,7 +474,7 @@ export function App() {
 
     if (state.projectsOpen) {
       if (key.escape) {
-        dispatch({ type: "toggle-projects" });
+        dispatch({ type: "back" });
         return;
       }
       if (key.downArrow || input === "j") {
@@ -442,8 +498,7 @@ export function App() {
       const viewport = Math.max(3, rows - 8);
       const maxScroll = Math.max(0, lineCount - viewport);
       if (key.escape) {
-        dispatch({ type: "close-sessions" });
-        dispatch({ type: "toggle-projects" });
+        dispatch({ type: "back" });
         return;
       }
       if (key.downArrow || input === "j") {
@@ -478,7 +533,7 @@ export function App() {
       const viewport = Math.max(3, rows - 8);
       const maxScroll = Math.max(0, total - viewport);
       if (key.escape || input === "p") {
-        dispatch({ type: "toggle-permissions" });
+        dispatch({ type: "back" });
         return;
       }
       if (key.downArrow || input === "j") {
@@ -494,8 +549,8 @@ export function App() {
     }
 
     if (state.detailOpen) {
-      if (key.escape || input === "q") {
-        dispatch({ type: "close-detail" });
+      if (key.escape) {
+        dispatch({ type: "back" });
         return;
       }
       if (key.downArrow || input === "j") {
@@ -555,12 +610,7 @@ export function App() {
     if (key.upArrow || input === "k")
       dispatch({ type: "move", delta: -1, max: filtered.length });
     if (key.return || input === "l") dispatch({ type: "open-detail" });
-    if (key.escape) {
-      // clear selection
-      if (state.selectedIdx !== null) {
-        dispatch({ type: "move", delta: -(state.selectedIdx + 99999), max: 1 });
-      }
-    }
+    if (key.escape) dispatch({ type: "back" });
   });
 
   return (
@@ -570,6 +620,27 @@ export function App() {
         eventCount={state.events.length}
         filter={state.filterAgent}
         paused={state.paused}
+      />
+      <Breadcrumb
+        projectFilter={state.projectFilter}
+        sessionFilter={state.sessionFilter}
+        sessionsForProject={state.sessionsForProject}
+        subAgentScope={state.subAgentScope}
+        agentFilter={state.filterAgent}
+        searchQuery={state.searchQuery}
+        view={
+          state.showHelp
+            ? "help"
+            : state.detailOpen
+              ? "detail"
+              : state.showPermissions
+                ? "permissions"
+                : state.sessionsForProject
+                  ? "sessions"
+                  : state.projectsOpen
+                    ? "projects"
+                    : "timeline"
+        }
       />
       {state.showHelp ? (
         <HelpView />
@@ -624,27 +695,6 @@ export function App() {
             {state.flashMessage}
           </Text>
         )}
-        {state.sessionFilter && (
-          <Text>
-            <Text color="yellow">↳ session </Text>
-            <Text bold>{state.sessionFilter.slice(0, 16)}</Text>
-            <Text dimColor>   (A to clear)</Text>
-          </Text>
-        )}
-        {state.projectFilter && (
-          <Text>
-            <Text color="yellow">↳ project </Text>
-            <Text bold>{state.projectFilter}</Text>
-            <Text dimColor>   (A for all projects, P to pick another)</Text>
-          </Text>
-        )}
-        {state.subAgentScope && (
-          <Text>
-            <Text color="yellow">↳ scoped to subagent </Text>
-            <Text bold>{state.subAgentScope.slice(0, 12)}</Text>
-            <Text dimColor>   (X to unscope)</Text>
-          </Text>
-        )}
         {(state.searchOpen || state.searchQuery) && (
           <Text>
             <Text color="yellow">/ </Text>
@@ -664,7 +714,7 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[?] help  [q] quit  [↑↓] select  [enter] detail  [y] yank  [P] projects  [x] subagent  [/] search  [p] permissions  [space] ${state.paused ? "resume" : "pause"}`}
+                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [Z] clear filters`}
         </Text>
       </Box>
     </Box>
