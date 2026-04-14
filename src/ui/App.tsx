@@ -14,11 +14,10 @@ import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
 import { Breadcrumb } from "./Breadcrumb.js";
 import { detectAgents } from "../adapters/detect.js";
-import { startClaudeAdapter } from "../adapters/claude-code.js";
-import { startOpenClawAdapter } from "../adapters/openclaw.js";
-import { startCursorAdapter } from "../adapters/cursor.js";
-import { startGeminiAdapter } from "../adapters/gemini.js";
-import { startFsAdapter } from "../adapters/fs-watcher.js";
+import {
+  startAllAdapters,
+  stopAllAdapters,
+} from "../adapters/registry.js";
 import { detectWorkspaceRoot } from "../util/workspace.js";
 import { readClaudePermissions } from "../util/claude-permissions.js";
 import { readOpenClawConfig } from "../util/openclaw-config.js";
@@ -369,9 +368,6 @@ export function App() {
     const sink: EventSink = {
       emit: (e: AgentEvent) => {
         dispatch({ type: "event", event: e });
-        // Only fire desktop alerts for events that happened AFTER
-        // the TUI was launched — backfill would otherwise spam for
-        // historical activity.
         const eventMs = new Date(e.ts).getTime();
         if (eventMs < launchedAt) return;
         const alert = shouldNotify(e);
@@ -381,19 +377,10 @@ export function App() {
         dispatch({ type: "enrich", eventId, patch });
       },
     };
-    const stopClaude = startClaudeAdapter(sink);
-    const stopOpenClaw = startOpenClawAdapter(sink);
-    const cursor = startCursorAdapter(workspace, sink);
-    setCursorStatus(cursor.status);
-    const stopGemini = startGeminiAdapter(sink);
-    const stopFs = startFsAdapter(workspace, sink);
-    return () => {
-      stopClaude();
-      stopOpenClaw();
-      cursor.stop();
-      stopGemini();
-      stopFs();
-    };
+    const adapters = startAllAdapters(sink, workspace);
+    const cursorAdapter = adapters.find((a) => a.name === "cursor");
+    if (cursorAdapter?.status) setCursorStatus(cursorAdapter.status);
+    return () => stopAllAdapters(adapters);
   }, [workspace]);
 
   const agentFiltered = state.filterAgent

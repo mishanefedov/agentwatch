@@ -509,6 +509,24 @@ npm run build         # tsup → dist/
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution workflow,
 issue triage policy, and what's in scope for PRs.
 
+## Docs
+
+In-depth documentation lives in `docs/`:
+
+- **[`docs/features/`](./docs/features/)** — one spec per feature:
+  what it does, how to invoke, inputs, outputs, failure modes,
+  interactions. 12 files covering timeline, detail pane, subagent
+  drilldown, projects + sessions navigation, search, permissions,
+  cost accounting, notifications, clipboard yank, filesystem watcher,
+  agent detection.
+- **[`docs/testing/`](./docs/testing/)** — manual test procedures per
+  feature, plus a 15-minute pre-release walkthrough
+  ([`TEST-SCRIPT.md`](./docs/testing/TEST-SCRIPT.md)).
+- **[`docs/use-cases/`](./docs/use-cases/)** — real-world scenarios:
+  multi-agent triage on a monorepo, cost-overrun investigation,
+  security audit, stuck-loop detection, subagent post-mortem, .env
+  leak alert.
+
 ---
 
 ## Security
