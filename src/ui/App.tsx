@@ -12,6 +12,8 @@ import { startCursorAdapter } from "../adapters/cursor.js";
 import { startFsAdapter } from "../adapters/fs-watcher.js";
 import { detectWorkspaceRoot } from "../util/workspace.js";
 import { readClaudePermissions } from "../util/claude-permissions.js";
+import { readOpenClawConfig } from "../util/openclaw-config.js";
+import type { CursorStatus } from "../adapters/cursor.js";
 
 const MAX_EVENTS = 500;
 
@@ -80,7 +82,11 @@ export function App() {
   const { exit } = useApp();
   const [workspace] = useState(detectWorkspaceRoot());
   const [agents] = useState(detectAgents());
-  const [permissions] = useState(() => readClaudePermissions(workspace));
+  const [claudePerms] = useState(() => readClaudePermissions(workspace));
+  const [openclawCfg] = useState(() => readOpenClawConfig());
+  const [cursorStatus, setCursorStatus] = useState<CursorStatus | undefined>(
+    undefined,
+  );
   const [state, dispatch] = useReducer(reducer, {
     events: [],
     filterAgent: null,
@@ -95,6 +101,7 @@ export function App() {
     const stopClaude = startClaudeAdapter(onEvent);
     const stopOpenClaw = startOpenClawAdapter(onEvent);
     const cursor = startCursorAdapter(workspace, onEvent);
+    setCursorStatus(cursor.status);
     const stopFs = startFsAdapter(workspace, onEvent);
     return () => {
       stopClaude();
@@ -138,7 +145,11 @@ export function App() {
         paused={state.paused}
       />
       {state.showPermissions ? (
-        <PermissionView permissions={permissions} />
+        <PermissionView
+          claude={claudePerms}
+          cursor={cursorStatus}
+          openclaw={openclawCfg}
+        />
       ) : (
         <Box flexDirection="row">
           <Box flexGrow={1} flexDirection="column">

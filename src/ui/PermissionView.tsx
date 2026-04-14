@@ -1,35 +1,48 @@
 import { Box, Text } from "ink";
 import type { ClaudePermissions } from "../util/claude-permissions.js";
+import type { CursorStatus } from "../adapters/cursor.js";
+import type { OpenClawConfig } from "../util/openclaw-config.js";
 
 interface Props {
-  permissions: ClaudePermissions[];
+  claude: ClaudePermissions[];
+  cursor?: CursorStatus;
+  openclaw: OpenClawConfig | null;
 }
 
-export function PermissionView({ permissions }: Props) {
-  if (permissions.length === 0) {
-    return (
-      <Box flexDirection="column" borderStyle="double" paddingX={1}>
-        <Text bold color="cyan">Permissions — Claude Code</Text>
-        <Text dimColor>No settings.json found at ~/.claude/ or project .claude/</Text>
-        <Text dimColor>Press p to close.</Text>
-      </Box>
-    );
-  }
-
+export function PermissionView({ claude, cursor, openclaw }: Props) {
   return (
     <Box flexDirection="column" borderStyle="double" paddingX={1}>
-      <Text bold color="cyan">Permissions — Claude Code</Text>
-      {permissions.map((p) => (
-        <Block key={p.source} perms={p} />
-      ))}
+      <Text bold color="cyan">Permissions / Configuration across installed agents</Text>
+
+      <ClaudeSection permissions={claude} />
+      <CursorSection cursor={cursor} />
+      <OpenClawSection config={openclaw} />
+
       <Box marginTop={1}>
-        <Text dimColor>Press p to close. These are the permissions Claude Code uses on your machine.</Text>
+        <Text dimColor>
+          Press p to close. Gemini CLI exposes no permission model beyond auth, so it is omitted.
+        </Text>
       </Box>
     </Box>
   );
 }
 
-function Block({ perms }: { perms: ClaudePermissions }) {
+// ─── Claude ─────────────────────────────────────────────────────────────────
+
+function ClaudeSection({ permissions }: { permissions: ClaudePermissions[] }) {
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold color="cyan">━ Claude Code ━</Text>
+      {permissions.length === 0 ? (
+        <Text dimColor>  No settings.json found.</Text>
+      ) : (
+        permissions.map((p) => <ClaudeBlock key={p.source} perms={p} />)
+      )}
+    </Box>
+  );
+}
+
+function ClaudeBlock({ perms }: { perms: ClaudePermissions }) {
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text>
@@ -41,7 +54,7 @@ function Block({ perms }: { perms: ClaudePermissions }) {
         <Text color={modeColor(perms.defaultMode)}>{perms.defaultMode}</Text>
       </Text>
 
-      <Box marginTop={1} flexDirection="column">
+      <Box flexDirection="column" marginTop={1}>
         <Text bold color="green">CAN ({perms.allow.length})</Text>
         {perms.allow.length === 0 ? (
           <Text dimColor>  (none — defaultMode applies)</Text>
@@ -52,7 +65,7 @@ function Block({ perms }: { perms: ClaudePermissions }) {
         )}
       </Box>
 
-      <Box marginTop={1} flexDirection="column">
+      <Box flexDirection="column" marginTop={1}>
         <Text bold color="red">CANNOT ({perms.deny.length})</Text>
         {perms.deny.length === 0 ? (
           <Text dimColor>  (none — no explicit denies)</Text>
@@ -63,17 +76,8 @@ function Block({ perms }: { perms: ClaudePermissions }) {
         )}
       </Box>
 
-      {perms.additionalDirectories.length > 0 && (
-        <Box marginTop={1} flexDirection="column">
-          <Text bold>Additional writable directories</Text>
-          {perms.additionalDirectories.map((d, i) => (
-            <Text key={i}>  • {d}</Text>
-          ))}
-        </Box>
-      )}
-
       {perms.flags.length > 0 && (
-        <Box marginTop={1} flexDirection="column">
+        <Box flexDirection="column" marginTop={1}>
           <Text bold color="yellow">⚠ Flags</Text>
           {perms.flags.map((f, i) => (
             <Text key={i} color={f.level === "risk" ? "red" : "yellow"}>
@@ -86,8 +90,117 @@ function Block({ perms }: { perms: ClaudePermissions }) {
   );
 }
 
+// ─── Cursor ─────────────────────────────────────────────────────────────────
+
+function CursorSection({ cursor }: { cursor?: CursorStatus }) {
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold color="magenta">━ Cursor ━</Text>
+      {!cursor?.installed ? (
+        <Text dimColor>  not detected</Text>
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          {cursor.permissions ? (
+            <>
+              <Text>
+                <Text dimColor>approvalMode: </Text>
+                <Text color={modeColor(cursor.permissions.approvalMode)}>
+                  {cursor.permissions.approvalMode}
+                </Text>
+                <Text dimColor>   sandbox: </Text>
+                <Text
+                  color={
+                    cursor.permissions.sandboxMode === "disabled" ? "red" : "green"
+                  }
+                >
+                  {cursor.permissions.sandboxMode}
+                </Text>
+              </Text>
+              <Text>
+                <Text color="green">CAN:</Text>{" "}
+                <Text>{cursor.permissions.allowCount}</Text>{" "}
+                <Text color="red">CANNOT:</Text>{" "}
+                <Text>{cursor.permissions.denyCount}</Text>
+              </Text>
+            </>
+          ) : (
+            <Text dimColor>  cli-config.json not parseable</Text>
+          )}
+          <Text>
+            <Text dimColor>MCP servers: </Text>
+            <Text>
+              {cursor.mcpServers.length === 0
+                ? "none"
+                : `${cursor.mcpServers.length} (${cursor.mcpServers.join(", ")})`}
+            </Text>
+          </Text>
+          <Text>
+            <Text dimColor>.cursorrules discovered: </Text>
+            <Text>{cursor.cursorRulesFiles.length}</Text>
+          </Text>
+          {cursor.cursorRulesFiles.slice(0, 5).map((f, i) => (
+            <Text key={i} dimColor>  • {f}</Text>
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+// ─── OpenClaw ───────────────────────────────────────────────────────────────
+
+function OpenClawSection({ config }: { config: OpenClawConfig | null }) {
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold color="yellow">━ OpenClaw ━</Text>
+      {!config ? (
+        <Text dimColor>  not detected</Text>
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          <Text>
+            <Text dimColor>source: </Text>
+            <Text>{config.source}</Text>
+          </Text>
+          {config.defaultWorkspace && (
+            <Text>
+              <Text dimColor>default workspace: </Text>
+              <Text>{config.defaultWorkspace}</Text>
+            </Text>
+          )}
+          <Text dimColor>
+            {"  "}OpenClaw runs with broad shell + file access per agent. No
+            allow/deny list — scope is controlled by the workspace path.
+          </Text>
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold>Sub-agents ({config.agents.length})</Text>
+            {config.agents.length === 0 ? (
+              <Text dimColor>  (none configured)</Text>
+            ) : (
+              config.agents.map((a) => (
+                <Box key={a.id} flexDirection="column" marginTop={1}>
+                  <Text>
+                    {a.emoji ? `${a.emoji} ` : ""}
+                    <Text bold>{a.name ?? a.id}</Text>
+                    <Text dimColor> (id: {a.id}{a.default ? ", default" : ""})</Text>
+                  </Text>
+                  {a.model && (
+                    <Text dimColor>  model: {a.model}</Text>
+                  )}
+                  {a.workspace && (
+                    <Text dimColor>  workspace: {a.workspace}</Text>
+                  )}
+                </Box>
+              ))
+            )}
+          </Box>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 function modeColor(mode: string): string {
   if (mode === "auto" || mode === "bypassPermissions") return "red";
-  if (mode === "ask") return "green";
+  if (mode === "ask" || mode === "allowlist") return "green";
   return "yellow";
 }
