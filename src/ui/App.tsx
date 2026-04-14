@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
-import type { AgentEvent, AgentName } from "../schema.js";
+import type { AgentEvent, AgentName, EventDetails, EventSink } from "../schema.js";
 import { Timeline } from "./Timeline.js";
 import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
@@ -62,6 +62,7 @@ type State = {
 
 type Action =
   | { type: "event"; event: AgentEvent }
+  | { type: "enrich"; eventId: string; patch: Partial<EventDetails> }
   | { type: "toggle-agents" }
   | { type: "toggle-permissions" }
   | { type: "cycle-filter"; agents: AgentName[] }
@@ -84,12 +85,22 @@ function reducer(state: State, action: Action): State {
       const idx = findInsertIdx(next, action.event.ts);
       next.splice(idx, 0, action.event);
       if (next.length > MAX_EVENTS) next.length = MAX_EVENTS;
-      // If the user is currently on a selected row, keep the cursor on the
-      // same event by shifting its index when a newer event is inserted
-      // above it.
       let sel = state.selectedIdx;
       if (sel !== null && idx <= sel) sel = sel + 1;
       return { ...state, events: next, selectedIdx: sel };
+    }
+    case "enrich": {
+      const next = state.events.slice();
+      for (let i = 0; i < next.length; i++) {
+        if (next[i]!.id !== action.eventId) continue;
+        const e = next[i]!;
+        next[i] = {
+          ...e,
+          details: { ...(e.details ?? {}), ...action.patch },
+        };
+        return { ...state, events: next };
+      }
+      return state;
     }
     case "toggle-agents":
       return { ...state, showAgents: !state.showAgents };
@@ -165,13 +176,16 @@ export function App() {
   });
 
   useEffect(() => {
-    const onEvent = (e: AgentEvent) =>
-      dispatch({ type: "event", event: e });
-    const stopClaude = startClaudeAdapter(onEvent);
-    const stopOpenClaw = startOpenClawAdapter(onEvent);
-    const cursor = startCursorAdapter(workspace, onEvent);
+    const sink: EventSink = {
+      emit: (e: AgentEvent) => dispatch({ type: "event", event: e }),
+      enrich: (eventId: string, patch: Partial<EventDetails>) =>
+        dispatch({ type: "enrich", eventId, patch }),
+    };
+    const stopClaude = startClaudeAdapter(sink);
+    const stopOpenClaw = startOpenClawAdapter(sink);
+    const cursor = startCursorAdapter(workspace, sink);
     setCursorStatus(cursor.status);
-    const stopFs = startFsAdapter(workspace, onEvent);
+    const stopFs = startFsAdapter(workspace, sink);
     return () => {
       stopClaude();
       stopOpenClaw();

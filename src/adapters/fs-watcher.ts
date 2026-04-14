@@ -1,9 +1,9 @@
 import chokidar from "chokidar";
-import type { AgentEvent } from "../schema.js";
+import type { AgentEvent, EventSink } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 
-type Emit = (e: AgentEvent) => void;
+type Emit = EventSink | ((e: AgentEvent) => void);
 
 const DEFAULT_IGNORES = [
   /(^|[/\\])node_modules([/\\]|$)/,
@@ -30,7 +30,8 @@ const DEFAULT_IGNORES = [
   /bun\.lockb$/,
 ];
 
-export function startFsAdapter(root: string, emit: Emit): () => void {
+export function startFsAdapter(root: string, sink: Emit): () => void {
+  const emit = typeof sink === "function" ? sink : sink.emit;
   const watcher = chokidar.watch(root, {
     persistent: true,
     ignoreInitial: true,

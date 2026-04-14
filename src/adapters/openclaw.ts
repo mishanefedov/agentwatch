@@ -7,7 +7,9 @@ import type { AgentEvent, EventType } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 
-type Emit = (e: AgentEvent) => void;
+import type { EventSink } from "../schema.js";
+
+type Emit = EventSink | ((e: AgentEvent) => void);
 
 interface FileCursor {
   offset: number;
@@ -18,7 +20,8 @@ interface FileCursor {
 // with a project label.
 const sessionCwd = new Map<string, string>();
 
-export function startOpenClawAdapter(emit: Emit): () => void {
+export function startOpenClawAdapter(sink: Emit): () => void {
+  const emit = typeof sink === "function" ? sink : sink.emit;
   const root = join(homedir(), ".openclaw");
   if (!existsSync(root)) return () => {};
 
@@ -68,7 +71,7 @@ function processSession(
   file: string,
   startFromEnd: boolean,
   cursors: Map<string, FileCursor>,
-  emit: Emit,
+  emit: (e: AgentEvent) => void,
 ) {
   const subAgent = extractSubAgent(file);
   const sessionId = basename(file, ".jsonl");
@@ -88,7 +91,7 @@ function processAudit(
   file: string,
   startFromEnd: boolean,
   cursors: Map<string, FileCursor>,
-  emit: Emit,
+  emit: (e: AgentEvent) => void,
 ) {
   streamLines(file, startFromEnd, cursors, (line) => {
     let obj: unknown;
@@ -109,7 +112,7 @@ function streamLines(
   isInitialAdd: boolean,
   cursors: Map<string, FileCursor>,
   onLine: (line: string) => void,
-) {
+): void {
   const size = safeSize(file);
   let cursor = cursors.get(file);
   if (!cursor) {

@@ -7,11 +7,11 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { AgentEvent, EventType } from "../schema.js";
+import type { AgentEvent, EventType, EventSink } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 
-type Emit = (e: AgentEvent) => void;
+type Emit = EventSink | ((e: AgentEvent) => void);
 
 export interface CursorStatus {
   installed: boolean;
@@ -35,8 +35,9 @@ export interface CursorStatus {
  */
 export function startCursorAdapter(
   workspace: string,
-  emit: Emit,
+  sink: Emit,
 ): { stop: () => void; status: CursorStatus } {
+  const emit = typeof sink === "function" ? sink : sink.emit;
   const cursorDir = join(homedir(), ".cursor");
   const installed = existsSync(cursorDir);
   const status: CursorStatus = {
