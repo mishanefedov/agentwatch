@@ -17,6 +17,7 @@ import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
 import { startCursorAdapter } from "../adapters/cursor.js";
+import { startGeminiAdapter } from "../adapters/gemini.js";
 import { startFsAdapter } from "../adapters/fs-watcher.js";
 import { detectWorkspaceRoot } from "../util/workspace.js";
 import { readClaudePermissions } from "../util/claude-permissions.js";
@@ -384,11 +385,13 @@ export function App() {
     const stopOpenClaw = startOpenClawAdapter(sink);
     const cursor = startCursorAdapter(workspace, sink);
     setCursorStatus(cursor.status);
+    const stopGemini = startGeminiAdapter(sink);
     const stopFs = startFsAdapter(workspace, sink);
     return () => {
       stopClaude();
       stopOpenClaw();
       cursor.stop();
+      stopGemini();
       stopFs();
     };
   }, [workspace]);
