@@ -34,7 +34,12 @@ interface FileCursor {
   offset: number;
 }
 
-const BACKFILL_BYTES = 64 * 1024;
+/** When agentwatch restarts, each active session is backfilled from this
+ *  many bytes behind EOF. 64 KB is ~20-50 turns — too small for heavy
+ *  users who closed the TUI for a few hours. 4 MB covers ~days of a
+ *  typical Claude session without blowing up memory (still bounded by
+ *  MAX_EVENTS = 500 in the buffer). */
+const BACKFILL_BYTES = 4 * 1024 * 1024;
 
 export function startClaudeAdapter(sink: Emit): () => void {
   const { emit, enrich } = normalizeSink(sink);
