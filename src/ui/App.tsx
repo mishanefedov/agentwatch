@@ -10,6 +10,7 @@ import { ProjectsView } from "./ProjectsView.js";
 import { SessionsView, sessionLineCount } from "./SessionsView.js";
 import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
+import { notify, shouldNotify } from "../util/notifier.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
@@ -301,10 +302,21 @@ export function App() {
   });
 
   useEffect(() => {
+    const launchedAt = Date.now();
     const sink: EventSink = {
-      emit: (e: AgentEvent) => dispatch({ type: "event", event: e }),
-      enrich: (eventId: string, patch: Partial<EventDetails>) =>
-        dispatch({ type: "enrich", eventId, patch }),
+      emit: (e: AgentEvent) => {
+        dispatch({ type: "event", event: e });
+        // Only fire desktop alerts for events that happened AFTER
+        // the TUI was launched — backfill would otherwise spam for
+        // historical activity.
+        const eventMs = new Date(e.ts).getTime();
+        if (eventMs < launchedAt) return;
+        const alert = shouldNotify(e);
+        if (alert) notify(alert.title, alert.body);
+      },
+      enrich: (eventId: string, patch: Partial<EventDetails>) => {
+        dispatch({ type: "enrich", eventId, patch });
+      },
     };
     const stopClaude = startClaudeAdapter(sink);
     const stopOpenClaw = startOpenClawAdapter(sink);
