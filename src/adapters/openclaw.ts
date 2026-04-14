@@ -147,7 +147,7 @@ function extractSubAgent(file: string): string {
   return "unknown";
 }
 
-function translateSession(
+export function translateSession(
   obj: unknown,
   subAgent: string,
   sessionId: string,
@@ -216,7 +216,7 @@ function translateSession(
   return null;
 }
 
-function translateAudit(obj: unknown): AgentEvent | null {
+export function translateAudit(obj: unknown): AgentEvent | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
   const ts =

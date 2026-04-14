@@ -54,7 +54,7 @@ export function startClaudeAdapter(emit: Emit): () => void {
       if (!line.trim()) return;
       try {
         const obj = JSON.parse(line);
-        const event = translate(obj, sessionId);
+        const event = translateClaudeLine(obj, sessionId);
         if (event) emit(event);
       } catch {
         // ignore malformed lines
@@ -80,7 +80,10 @@ function safeSize(file: string): number {
   }
 }
 
-function translate(obj: unknown, sessionId: string): AgentEvent | null {
+export function translateClaudeLine(
+  obj: unknown,
+  sessionId: string,
+): AgentEvent | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
   const ts =
