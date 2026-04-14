@@ -1,7 +1,7 @@
 import chokidar from "chokidar";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 import type { AgentEvent, EventSink, EventType } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";

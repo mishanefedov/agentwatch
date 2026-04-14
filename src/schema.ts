@@ -4,6 +4,11 @@ export type AgentName =
   | "cursor"
   | "gemini"
   | "openclaw"
+  | "aider"
+  | "cline"
+  | "continue"
+  | "windsurf"
+  | "goose"
   | "unknown";
 
 export type EventType =
