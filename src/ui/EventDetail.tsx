@@ -53,9 +53,9 @@ function buildRows(event: AgentEvent, width: number): Row[] {
   const rows: Row[] = [];
   const max = Math.max(40, width - 4);
 
-  if (d?.usage || d?.cost != null) {
-    rows.push({ kind: "heading", text: "tokens / cost" });
-    const u = d.usage;
+  if (d?.usage || d?.cost != null || d?.durationMs != null) {
+    rows.push({ kind: "heading", text: "tokens / cost / duration" });
+    const u = d?.usage;
     if (u) {
       rows.push({
         kind: "text",
@@ -63,13 +63,28 @@ function buildRows(event: AgentEvent, width: number): Row[] {
         dim: true,
       });
     }
-    if (d.cost != null) {
+    if (d?.cost != null) {
       rows.push({
         kind: "text",
         text: `cost: ${formatUSD(d.cost)}${d.model ? `  (${d.model})` : ""}`,
         dim: true,
       });
     }
+    if (d?.durationMs != null) {
+      rows.push({
+        kind: "text",
+        text: `duration: ${formatDuration(d.durationMs)}${d.toolError ? "  — ERROR" : ""}`,
+        dim: true,
+      });
+    }
+  }
+
+  if (d?.toolResult) {
+    rows.push({
+      kind: "heading",
+      text: d.toolError ? "tool result (error)" : "tool result",
+    });
+    for (const l of wrap(d.toolResult, max)) rows.push({ kind: "text", text: l });
   }
 
   if (d?.fullText) {
@@ -129,6 +144,12 @@ function wrap(text: string, width: number): string[] {
 
 function truncateLine(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
 function colorFor(e: AgentEvent): string {

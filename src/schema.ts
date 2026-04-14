@@ -40,6 +40,20 @@ export interface EventDetails {
   cost?: number;
   /** Model id that produced this event. */
   model?: string;
+  /** Captured tool_result content (stdout / file body / search matches). */
+  toolResult?: string;
+  /** Milliseconds between tool_use emission and matched tool_result. */
+  durationMs?: number;
+  /** True if the matched tool_result had is_error set. */
+  toolError?: boolean;
+}
+
+/** Sink passed to adapters. Adapters emit new events and may later
+ *  enrich an already-emitted event (e.g. attaching a tool_result to the
+ *  original tool_use). */
+export interface EventSink {
+  emit: (event: AgentEvent) => void;
+  enrich: (eventId: string, patch: Partial<EventDetails>) => void;
 }
 
 export interface AgentEvent {

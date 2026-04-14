@@ -2,13 +2,21 @@ import chokidar from "chokidar";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { basename, sep } from "node:path";
-import type { AgentEvent, EventType } from "../schema.js";
+import type { AgentEvent, EventType, EventSink } from "../schema.js";
 import { riskOf } from "../schema.js";
 import { claudeProjectsDir } from "../util/workspace.js";
 import { nextId } from "../util/ids.js";
 import { costOf, parseUsage } from "../util/cost.js";
 
-type Emit = (e: AgentEvent) => void;
+type Emit = EventSink | ((e: AgentEvent) => void);
+
+// Shared across the adapter's lifetime so pairing survives backfill
+// arriving out of order (multiple sessions emit into the same maps).
+const pendingToolUses = new Map<string, { eventId: string; ts: string }>();
+const orphanResults = new Map<
+  string,
+  { ts: string; content: string; isError: boolean }
+>();
 
 interface FileCursor {
   offset: number;
@@ -16,7 +24,8 @@ interface FileCursor {
 
 const BACKFILL_BYTES = 64 * 1024;
 
-export function startClaudeAdapter(emit: Emit): () => void {
+export function startClaudeAdapter(sink: Emit): () => void {
+  const { emit, enrich } = normalizeSink(sink);
   const dir = claudeProjectsDir();
   if (!existsSync(dir)) {
     return () => {};
@@ -70,8 +79,34 @@ export function startClaudeAdapter(emit: Emit): () => void {
       if (!line.trim()) return;
       try {
         const obj = JSON.parse(line);
+        // First, harvest any tool_result blocks from user turns — they
+        // correlate back to earlier tool_use events by tool_use_id.
+        handleToolResults(obj, enrich);
+
         const event = translateClaudeLine(obj, sessionId, project, subAgentId);
-        if (event) emit(event);
+        if (event) {
+          emit(event);
+          // If this event is a tool_use whose result already arrived
+          // (backfill ordering quirk), attach it immediately.
+          const toolUseId = event.details?.toolUseId;
+          if (toolUseId && orphanResults.has(toolUseId)) {
+            const orphan = orphanResults.get(toolUseId)!;
+            orphanResults.delete(toolUseId);
+            enrich(event.id, {
+              toolResult: orphan.content,
+              toolError: orphan.isError,
+              durationMs: Math.max(
+                0,
+                new Date(orphan.ts).getTime() - new Date(event.ts).getTime(),
+              ),
+            });
+          } else if (toolUseId) {
+            pendingToolUses.set(toolUseId, {
+              eventId: event.id,
+              ts: event.ts,
+            });
+          }
+        }
       } catch {
         // ignore malformed lines
       }
@@ -116,6 +151,78 @@ function extractSubAgentId(file: string): string {
   // …/subagents/agent-<id>.jsonl → <id>
   const base = basename(file, ".jsonl");
   return base.replace(/^agent-/, "");
+}
+
+function normalizeSink(sink: Emit): EventSink {
+  if (typeof sink === "function") {
+    return { emit: sink, enrich: () => {} };
+  }
+  return sink;
+}
+
+/** Claude tool results live inside user turns: message.content[] with
+ *  type:"tool_result", tool_use_id:"...". Walk them and enrich the
+ *  matching tool_use event. */
+function handleToolResults(
+  obj: unknown,
+  enrich: EventSink["enrich"],
+): void {
+  if (!obj || typeof obj !== "object") return;
+  const o = obj as Record<string, unknown>;
+  const role =
+    o.role ?? (o.message as Record<string, unknown> | undefined)?.role;
+  if (role !== "user") return;
+  const content = (o.message as Record<string, unknown> | undefined)?.content;
+  if (!Array.isArray(content)) return;
+  const ts =
+    (typeof o.timestamp === "string" && o.timestamp) ||
+    new Date().toISOString();
+
+  for (const block of content) {
+    if (typeof block !== "object" || block === null) continue;
+    const b = block as Record<string, unknown>;
+    if (b.type !== "tool_result") continue;
+    const id = typeof b.tool_use_id === "string" ? b.tool_use_id : undefined;
+    if (!id) continue;
+    const isError = b.is_error === true;
+    const content = flattenResultContent(b.content);
+    const pending = pendingToolUses.get(id);
+    if (pending) {
+      pendingToolUses.delete(id);
+      enrich(pending.eventId, {
+        toolResult: content,
+        toolError: isError,
+        durationMs: Math.max(
+          0,
+          new Date(ts).getTime() - new Date(pending.ts).getTime(),
+        ),
+      });
+    } else {
+      // tool_result seen before tool_use (possible during backfill).
+      // Stash for up to 10 minutes.
+      orphanResults.set(id, { ts, content, isError });
+      if (orphanResults.size > 1000) {
+        // cap memory — drop the oldest entries
+        const first = orphanResults.keys().next().value;
+        if (first) orphanResults.delete(first);
+      }
+    }
+  }
+}
+
+function flattenResultContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const c of content) {
+    if (typeof c === "string") {
+      parts.push(c);
+    } else if (typeof c === "object" && c !== null) {
+      const rec = c as Record<string, unknown>;
+      if (typeof rec.text === "string") parts.push(rec.text);
+    }
+  }
+  return parts.join("\n");
 }
 
 function safeSize(file: string): number {
