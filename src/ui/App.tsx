@@ -105,7 +105,13 @@ export function App() {
   }, [workspace]);
 
   useInput((input, key) => {
-    if (input === "q" || (key.ctrl && input === "c")) exit();
+    if (input === "q" || (key.ctrl && input === "c")) {
+      // Force-exit: chokidar's watcher.close() is slow and the OS will
+      // reap fds anyway. No reason to block the user at shutdown.
+      exit();
+      setImmediate(() => process.exit(0));
+      return;
+    }
     if (input === "a") dispatch({ type: "toggle-agents" });
     if (input === "f") {
       const presentAgents = agents.filter((a) => a.present).map((a) => a.name);
