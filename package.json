@@ -58,5 +58,9 @@
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ]
 }
