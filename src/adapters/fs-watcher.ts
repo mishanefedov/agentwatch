@@ -6,14 +6,28 @@ import { nextId } from "../util/ids.js";
 type Emit = (e: AgentEvent) => void;
 
 const DEFAULT_IGNORES = [
-  /(^|[/\\])node_modules[/\\]/,
-  /(^|[/\\])\.git[/\\]/,
-  /(^|[/\\])dist[/\\]/,
-  /(^|[/\\])build[/\\]/,
-  /(^|[/\\])\.next[/\\]/,
-  /(^|[/\\])\.cache[/\\]/,
-  /(^|[/\\])target[/\\]/,
+  /(^|[/\\])node_modules([/\\]|$)/,
+  /(^|[/\\])\.git([/\\]|$)/,
+  /(^|[/\\])dist([/\\]|$)/,
+  /(^|[/\\])build([/\\]|$)/,
+  /(^|[/\\])\.next([/\\]|$)/,
+  /(^|[/\\])\.cache([/\\]|$)/,
+  /(^|[/\\])\.turbo([/\\]|$)/,
+  /(^|[/\\])target([/\\]|$)/,
+  /(^|[/\\])coverage([/\\]|$)/,
+  /(^|[/\\])\.venv([/\\]|$)/,
+  /(^|[/\\])venv([/\\]|$)/,
+  /(^|[/\\])__pycache__([/\\]|$)/,
+  /(^|[/\\])\.pytest_cache([/\\]|$)/,
+  /(^|[/\\])\.idea([/\\]|$)/,
+  /(^|[/\\])\.vscode([/\\]|$)/,
+  /(^|[/\\])\.DS_Store$/,
   /\.log$/,
+  /\.lock$/,
+  /package-lock\.json$/,
+  /pnpm-lock\.yaml$/,
+  /yarn\.lock$/,
+  /bun\.lockb$/,
 ];
 
 export function startFsAdapter(root: string, emit: Emit): () => void {
@@ -21,7 +35,13 @@ export function startFsAdapter(root: string, emit: Emit): () => void {
     persistent: true,
     ignoreInitial: true,
     ignored: (p) => DEFAULT_IGNORES.some((r) => r.test(p)),
-    depth: 8,
+    depth: 3,
+  });
+
+  watcher.on("error", (err) => {
+    if (isSuppressible(err)) return;
+    // eslint-disable-next-line no-console
+    console.error("[agentwatch/fs]", String(err));
   });
 
   const emitFs = (path: string) => {
@@ -40,5 +60,13 @@ export function startFsAdapter(root: string, emit: Emit): () => void {
   watcher.on("add", emitFs);
   watcher.on("change", emitFs);
 
-  return () => watcher.close();
+  return () => {
+    void watcher.close();
+  };
+}
+
+function isSuppressible(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const code = (err as { code?: string }).code;
+  return code === "EMFILE" || code === "ENOSPC" || code === "EACCES";
 }

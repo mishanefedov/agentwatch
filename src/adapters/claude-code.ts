@@ -68,8 +68,18 @@ export function startClaudeAdapter(emit: Emit): () => void {
 
   watcher.on("add", (f) => process(f, true));
   watcher.on("change", (f) => process(f, false));
+  watcher.on("error", (err) => {
+    if (typeof err === "object" && err !== null) {
+      const code = (err as { code?: string }).code;
+      if (code === "EMFILE" || code === "ENOSPC" || code === "EACCES") return;
+    }
+    // eslint-disable-next-line no-console
+    console.error("[agentwatch/claude]", String(err));
+  });
 
-  return () => watcher.close();
+  return () => {
+    void watcher.close();
+  };
 }
 
 function safeSize(file: string): number {

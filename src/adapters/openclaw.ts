@@ -36,7 +36,10 @@ export function startOpenClawAdapter(emit: Emit): () => void {
   };
   sessionsWatcher.on("add", (f) => handleSession(f, true));
   sessionsWatcher.on("change", (f) => handleSession(f, false));
-  stoppers.push(() => sessionsWatcher.close());
+  sessionsWatcher.on("error", swallow);
+  stoppers.push(() => {
+    void sessionsWatcher.close();
+  });
 
   // 2) config-audit.jsonl — security-relevant config writes
   const auditPath = join(root, "logs", "config-audit.jsonl");
@@ -46,7 +49,10 @@ export function startOpenClawAdapter(emit: Emit): () => void {
   });
   auditWatcher.on("add", (f) => processAudit(f, true, cursors, emit));
   auditWatcher.on("change", (f) => processAudit(f, false, cursors, emit));
-  stoppers.push(() => auditWatcher.close());
+  auditWatcher.on("error", swallow);
+  stoppers.push(() => {
+    void auditWatcher.close();
+  });
 
   return () => {
     for (const s of stoppers) s();
@@ -129,6 +135,14 @@ function streamLines(
   rl.on("close", () => {
     cursor!.offset = start + consumed;
   });
+}
+
+function swallow(err: unknown): void {
+  if (typeof err !== "object" || err === null) return;
+  const code = (err as { code?: string }).code;
+  if (code === "EMFILE" || code === "ENOSPC" || code === "EACCES") return;
+  // eslint-disable-next-line no-console
+  console.error("[agentwatch/openclaw]", String(err));
 }
 
 function safeSize(file: string): number {

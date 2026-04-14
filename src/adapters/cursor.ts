@@ -1,5 +1,10 @@
 import chokidar from "chokidar";
-import { readFileSync, statSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, EventType } from "../schema.js";
@@ -11,13 +16,12 @@ type Emit = (e: AgentEvent) => void;
 /**
  * Cursor adapter — config-level only in v0.
  *
- * Cursor's live activity is partially exposed through a SQLite DB
- * (`~/.cursor/ai-tracking/ai-code-tracking.db`) which requires additional
- * dependencies to parse. For v0 we watch the JSON/text config surface:
- *   - mcp.json         (MCP server list)
- *   - cli-config.json  (permissions, approval mode, sandbox)
- *   - ide_state.json   (recently viewed files — real activity signal)
- *   - project-level .cursorrules files in the workspace
+ * Intentionally avoids watching the full workspace recursively (that was an
+ * EMFILE hazard). Strategy:
+ *   - Watch known singletons under ~/.cursor/ (mcp.json, cli-config.json,
+ *     ide_state.json)
+ *   - One-shot scan of the workspace's top two directory levels for
+ *     .cursorrules files, then watch each found file individually.
  */
 export function startCursorAdapter(workspace: string, emit: Emit): () => void {
   const cursorDir = join(homedir(), ".cursor");
@@ -43,28 +47,34 @@ export function startCursorAdapter(workspace: string, emit: Emit): () => void {
     });
   };
 
-  // 1) Config files in ~/.cursor/
-  const configPaths = [
+  // 1) Singletons under ~/.cursor/
+  const singletons = [
     join(cursorDir, "mcp.json"),
     join(cursorDir, "cli-config.json"),
   ];
-  for (const path of configPaths) {
+  for (const path of singletons) {
     if (!existsSync(path)) continue;
-    const w = chokidar.watch(path, { persistent: true, ignoreInitial: false });
+    const w = chokidar.watch(path, {
+      persistent: true,
+      ignoreInitial: false,
+    });
     w.on("add", () => announceConfig(path, "detected", emitEvent));
     w.on("change", () => announceConfig(path, "changed", emitEvent));
-    stoppers.push(() => w.close());
+    w.on("error", swallow);
+    stoppers.push(() => {
+      void w.close();
+    });
   }
 
-  // 2) ide_state.json — recently viewed files. This is the richest local signal
-  //    Cursor exposes without touching the SQLite tracking DB.
+  // 2) ide_state.json — recently viewed files (rolling dedup)
   const stateFile = join(cursorDir, "ide_state.json");
   if (existsSync(stateFile)) {
     const w = chokidar.watch(stateFile, {
       persistent: true,
       ignoreInitial: true,
     });
-    const handler = () => {
+    for (const p of readRecentFiles(stateFile)) lastRecentFiles.add(p);
+    w.on("change", () => {
       const recent = readRecentFiles(stateFile);
       for (const path of recent) {
         if (lastRecentFiles.has(path)) continue;
@@ -74,45 +84,49 @@ export function startCursorAdapter(workspace: string, emit: Emit): () => void {
           path,
         });
       }
-    };
-    // seed from initial state so we don't re-emit history on first change
-    for (const p of readRecentFiles(stateFile)) lastRecentFiles.add(p);
-    w.on("change", handler);
-    stoppers.push(() => w.close());
+    });
+    w.on("error", swallow);
+    stoppers.push(() => {
+      void w.close();
+    });
   }
 
-  // 3) project-level .cursorrules anywhere under the workspace
-  const rulesWatcher = chokidar.watch(workspace, {
-    persistent: true,
-    ignoreInitial: false,
-    depth: 3,
-    ignored: (p) => {
-      if (/(^|[/\\])node_modules[/\\]/.test(p)) return true;
-      if (/(^|[/\\])\.git[/\\]/.test(p)) return true;
-      if (/(^|[/\\])dist[/\\]/.test(p)) return true;
-      return false;
-    },
-  });
-  const isRules = (f: string) => /(^|[/\\])\.cursorrules$/.test(f);
-  rulesWatcher.on("add", (f) => {
-    if (!isRules(f)) return;
-    emitEvent("file_read", `.cursorrules discovered: ${f}`, {
+  // 3) .cursorrules — one-shot discovery at shallow depth, then watch
+  //    each found file. No recursive workspace watcher — that blew the
+  //    macOS FD limit on large workspaces.
+  const rulesFiles = discoverCursorrules(workspace);
+  for (const path of rulesFiles) {
+    emitEvent("file_read", `.cursorrules discovered: ${path}`, {
       tool: "cursor:rules",
-      path: f,
+      path,
     });
-  });
-  rulesWatcher.on("change", (f) => {
-    if (!isRules(f)) return;
-    emitEvent("file_write", `.cursorrules edited: ${f}`, {
-      tool: "cursor:rules",
-      path: f,
+    const w = chokidar.watch(path, {
+      persistent: true,
+      ignoreInitial: true,
     });
-  });
-  stoppers.push(() => rulesWatcher.close());
+    w.on("change", () => {
+      emitEvent("file_write", `.cursorrules edited: ${path}`, {
+        tool: "cursor:rules",
+        path,
+      });
+    });
+    w.on("error", swallow);
+    stoppers.push(() => {
+      void w.close();
+    });
+  }
 
   return () => {
     for (const s of stoppers) s();
   };
+}
+
+function swallow(err: unknown): void {
+  if (typeof err !== "object" || err === null) return;
+  const code = (err as { code?: string }).code;
+  if (code === "EMFILE" || code === "ENOSPC" || code === "EACCES") return;
+  // eslint-disable-next-line no-console
+  console.error("[agentwatch/cursor]", String(err));
 }
 
 function announceConfig(
@@ -176,5 +190,32 @@ function readRecentFiles(stateFile: string): string[] {
   }
 }
 
-// keep statSync import active for future last-modified use
-void statSync;
+/** Shallow scan — workspace root + one level of sub-directories. */
+function discoverCursorrules(workspace: string): string[] {
+  const hits: string[] = [];
+  if (!existsSync(workspace)) return hits;
+
+  const rootRules = join(workspace, ".cursorrules");
+  if (existsSync(rootRules)) hits.push(rootRules);
+
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(workspace);
+  } catch {
+    return hits;
+  }
+
+  for (const name of entries) {
+    if (name.startsWith(".")) continue;
+    if (name === "node_modules") continue;
+    const dir = join(workspace, name);
+    try {
+      if (!statSync(dir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const candidate = join(dir, ".cursorrules");
+    if (existsSync(candidate)) hits.push(candidate);
+  }
+  return hits;
+}
