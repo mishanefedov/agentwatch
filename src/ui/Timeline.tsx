@@ -6,12 +6,28 @@ interface Props {
 }
 
 export function Timeline({ events }: Props) {
+  const header = (
+    <Box>
+      <Text bold dimColor>
+        {"TIME     "}
+        {pad("AGENT", 10)}
+        {" "}
+        {pad("TYPE", 13)}
+        {" "}
+        EVENT
+      </Text>
+    </Box>
+  );
+
   if (events.length === 0) {
     return (
-      <Box>
-        <Text dimColor>
-          waiting for activity… use Claude Code or edit a file in your workspace
-        </Text>
+      <Box flexDirection="column">
+        {header}
+        <Box marginTop={1}>
+          <Text dimColor>
+            waiting for activity… use Claude Code or edit a file in your workspace
+          </Text>
+        </Box>
       </Box>
     );
   }
@@ -20,6 +36,7 @@ export function Timeline({ events }: Props) {
 
   return (
     <Box flexDirection="column">
+      {header}
       {visible.map((e) => (
         <EventRow key={e.id} event={e} />
       ))}
