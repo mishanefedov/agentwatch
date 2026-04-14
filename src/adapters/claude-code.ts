@@ -23,16 +23,20 @@ export function startClaudeAdapter(emit: Emit): () => void {
 
   const cursors = new Map<string, FileCursor>();
   // chokidar v4 dropped glob support; watch the projects dir recursively
-  // and filter by path regex.
-  const sessionRe = /[\\/]projects[\\/][^\\/]+[\\/][^\\/]+\.jsonl$/;
+  // and filter by path regex. Two shapes matter:
+  //   …/projects/<proj>/<session>.jsonl                  — main session
+  //   …/projects/<proj>/<session>/subagents/<agent>.jsonl — subagent run
+  const mainRe = /[\\/]projects[\\/][^\\/]+[\\/][^\\/]+\.jsonl$/;
+  const subRe = /[\\/]projects[\\/][^\\/]+[\\/][^\\/]+[\\/]subagents[\\/][^\\/]+\.jsonl$/;
   const watcher = chokidar.watch(dir, {
     persistent: true,
     ignoreInitial: false,
-    depth: 3,
+    depth: 5,
   });
 
   const process = (file: string, isInitialAdd: boolean) => {
-    if (!sessionRe.test(file)) return;
+    const isSub = subRe.test(file);
+    if (!isSub && !mainRe.test(file)) return;
     const size = safeSize(file);
     let cursor = cursors.get(file);
     if (!cursor) {
@@ -51,6 +55,7 @@ export function startClaudeAdapter(emit: Emit): () => void {
 
     const sessionId = basename(file, ".jsonl");
     const project = extractProject(file);
+    const subAgentId = isSub ? extractSubAgentId(file) : undefined;
     let consumed = 0;
     let skippedFirst = false;
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
@@ -64,7 +69,7 @@ export function startClaudeAdapter(emit: Emit): () => void {
       if (!line.trim()) return;
       try {
         const obj = JSON.parse(line);
-        const event = translateClaudeLine(obj, sessionId, project);
+        const event = translateClaudeLine(obj, sessionId, project, subAgentId);
         if (event) emit(event);
       } catch {
         // ignore malformed lines
@@ -106,6 +111,12 @@ function extractProject(file: string): string {
   return "";
 }
 
+function extractSubAgentId(file: string): string {
+  // …/subagents/agent-<id>.jsonl → <id>
+  const base = basename(file, ".jsonl");
+  return base.replace(/^agent-/, "");
+}
+
 function safeSize(file: string): number {
   try {
     return statSync(file).size;
@@ -118,13 +129,17 @@ export function translateClaudeLine(
   obj: unknown,
   sessionId: string,
   project: string = "",
+  subAgentId?: string,
 ): AgentEvent | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
   const ts =
     (typeof o.timestamp === "string" && o.timestamp) ||
     new Date().toISOString();
-  const prefix = project ? `[${project}] ` : "";
+  const tagParts: string[] = [];
+  if (project) tagParts.push(project);
+  if (subAgentId) tagParts.push(`sub:${subAgentId.slice(0, 8)}`);
+  const prefix = tagParts.length > 0 ? `[${tagParts.join(" / ")}] ` : "";
 
   const role = o.role ?? (o.message as Record<string, unknown> | undefined)?.role;
   const type = o.type;
