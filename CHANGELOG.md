@@ -12,6 +12,93 @@ layout can change freely within a minor version.
 
 ## [0.0.2] — 2026-04-14
 
+### Added — claude-devtools parity (v0.3 feature wave)
+- **Event detail pane** (`Enter`) — full-screen view of any event with
+  tokens, cost, duration, tool input, tool result, full text, extended
+  thinking. Scrollable with `↑↓` / `j k`.
+- **Full-text search** (`/`) — narrows the timeline by summary / path /
+  cmd / tool / agent / full text / thinking. Live match count.
+- **Projects grid** (`P`) — one row per workspace on your machine,
+  per-agent event counts, total cost, last-active time.
+- **Sessions list** — bucketed by Today / Yesterday / Last 7 days /
+  Older. Each row: agent tag, first user prompt, event count,
+  duration, cost, error flag.
+- **Scoped session timeline** — Enter a session to filter the main
+  timeline to just that session's events.
+- **Subagent drilldown** (`x`) — scope the timeline to the inner tool
+  calls of a selected `Agent` spawn. `X` unscopes. Parent events show
+  `▸ N child events` suffix.
+- **Subagent JSONL ingestion** — `~/.claude/projects/*/SESSION/subagents/agent-*.jsonl`
+  is now captured (previously invisible; 8.5k events surfaced on a
+  typical dev machine).
+- **Per-session cost with cache-hit accounting** — per-model rates
+  (opus-4-6, sonnet-4-6, haiku-4-5) correctly weighting
+  `cache_creation_input_tokens` (125%) and `cache_read_input_tokens`
+  (10%). Naive summers are 3–10x wrong without this.
+- **tool_use ↔ tool_result pairing** — captures duration, full output
+  content, error flag for every Claude tool call.
+- **Desktop notifications** — built-ins fire for `.env` access,
+  `~/.ssh`/`.aws`/`.gnupg` paths, `rm -rf` / `sudo` / `curl | sh`, and
+  tool errors. Rate-limited, backfill-silent.
+- **Yank to clipboard** (`y`) — copies the most useful payload (tool
+  result > full text > cmd > path) via `pbcopy` / `wl-copy` / `xclip`
+  / `clip`.
+- **Help overlay** (`?`) — grouped keybindings reference from any view.
+- **Breadcrumb header** — surfaces active view + every active scope
+  (project, session, subagent, agent, search).
+- **Per-agent permission viewer** extended to Cursor (approval mode,
+  sandbox, allow/deny, MCP servers, `.cursorrules`) and OpenClaw
+  (default workspace, per-sub-agent model + workspace).
+
+### Added — scaffold / discipline
+- **CONTRIBUTING.md**, **SECURITY.md**, **CODE_OF_CONDUCT.md**.
+- **Issue + PR templates** (bug, feature, adapter request).
+- **`0` = home** — reset all filters / scopes / modals.
+- **`Z` = clear filters** — replaces the confusing `A` case-variant.
+- **`esc` = go back one level** — consistent across every view.
+
+### Fixed
+- **Claude adapter was reading zero events.** chokidar v4 dropped glob
+  support; the `${dir}/**/*.jsonl` pattern never fired. Now watches
+  the projects dir recursively with a path regex. Reveals thousands of
+  events that were invisible in 0.0.1.
+- **EMFILE crash** after ~30s of real use. Reduced FS watcher depth
+  from 8 → 3, expanded ignores (coverage, `.venv`, `__pycache__`,
+  `.turbo`, lock files), replaced Cursor's recursive workspace watcher
+  with a one-shot shallow discovery + per-file watcher. All adapters
+  silently swallow EMFILE / ENOSPC / EACCES instead of crashing.
+- **`q` felt laggy** — chokidar's close waits on pending FDs. We now
+  force `process.exit(0)` on quit.
+- **Timeline rendered in arrival order**. Backfill arrived out of
+  order. Now binary-inserted by event timestamp — strict
+  reverse-chronological.
+- **Empty-content events polluted the timeline.** Assistant messages
+  with neither text nor tool_use are now suppressed.
+- **Clipboard + notifier EBADF inside the TUI** — Ink's raw-mode TTY
+  broke inherited stdio on spawnSync. Explicit pipe / ignore stdio on
+  all child process calls.
+- **fs-watcher double-counted Claude writes.** Introduced a
+  module-scoped `recentAgentWrites` cache; fs-watcher skips paths
+  an agent wrote within the last 5s.
+
+### Changed
+- Event `summary` now includes `[project]` prefix (Claude: extracted
+  from session path; OpenClaw: from `cwd` in `session_start`; Cursor:
+  path heuristic).
+- Assistant tool_use events now extract real payload into summary
+  instead of literal `tool_call`: `Bash: git log`, `Read: src/auth.ts`,
+  `Task: refactor parser`, etc.
+- Classification: Bash tool_use is now `shell_exec` (not `tool_call`)
+  with elevated risk scoring for destructive commands.
+
+### Notes
+- Not cloud. Not an agent. Not telemetry-enabled. Zero outbound
+  network calls.
+- macOS + Linux. Windows intentionally out of scope for v0.
+- Codex and Gemini adapters are intentionally deferred.
+
+## [0.0.1] — 2026-04-14
+
 ### Fixed
 - **Claude adapter silently reading zero events.** chokidar v4 dropped glob
   support; the `${dir}/**/*.jsonl` pattern never fired. Now watches the
