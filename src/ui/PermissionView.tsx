@@ -7,200 +7,266 @@ interface Props {
   claude: ClaudePermissions[];
   cursor?: CursorStatus;
   openclaw: OpenClawConfig | null;
+  /** How many rows (beyond header + footer) can fit in the visible box. */
+  viewportRows: number;
+  /** Scroll offset in rows, 0 = top. */
+  scrollOffset: number;
 }
 
-export function PermissionView({ claude, cursor, openclaw }: Props) {
+type Row =
+  | { kind: "h1"; text: string; color?: string }
+  | { kind: "h2"; text: string; color?: string }
+  | { kind: "kv"; label: string; value: string; valueColor?: string }
+  | { kind: "item"; mark: string; markColor?: string; text: string }
+  | { kind: "text"; text: string; dim?: boolean; color?: string }
+  | { kind: "blank" };
+
+export function PermissionView({
+  claude,
+  cursor,
+  openclaw,
+  viewportRows,
+  scrollOffset,
+}: Props) {
+  const rows = buildRows(claude, cursor, openclaw);
+  const height = Math.max(3, viewportRows);
+  const maxScroll = Math.max(0, rows.length - height);
+  const offset = Math.min(scrollOffset, maxScroll);
+  const visible = rows.slice(offset, offset + height);
+
   return (
     <Box flexDirection="column" borderStyle="double" paddingX={1}>
       <Text bold color="cyan">Permissions / Configuration across installed agents</Text>
-
-      <ClaudeSection permissions={claude} />
-      <CursorSection cursor={cursor} />
-      <OpenClawSection config={openclaw} />
-
+      <Box flexDirection="column" marginTop={1}>
+        {visible.map((row, i) => (
+          <RowView key={i} row={row} />
+        ))}
+      </Box>
       <Box marginTop={1}>
         <Text dimColor>
-          Press p to close. Gemini CLI exposes no permission model beyond auth, so it is omitted.
+          {rows.length > height
+            ? `${offset + 1}–${offset + visible.length} of ${rows.length}  [↑↓] scroll  `
+            : ""}
+          [p] close  [q] quit
         </Text>
       </Box>
     </Box>
   );
 }
 
-// ─── Claude ─────────────────────────────────────────────────────────────────
-
-function ClaudeSection({ permissions }: { permissions: ClaudePermissions[] }) {
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold color="cyan">━ Claude Code ━</Text>
-      {permissions.length === 0 ? (
-        <Text dimColor>  No settings.json found.</Text>
-      ) : (
-        permissions.map((p) => <ClaudeBlock key={p.source} perms={p} />)
-      )}
-    </Box>
-  );
+function RowView({ row }: { row: Row }) {
+  switch (row.kind) {
+    case "h1":
+      return (
+        <Text bold color={row.color ?? "cyan"}>
+          ━ {row.text} ━
+        </Text>
+      );
+    case "h2":
+      return (
+        <Text bold color={row.color ?? "white"}>
+          {row.text}
+        </Text>
+      );
+    case "kv":
+      return (
+        <Text>
+          <Text dimColor>{row.label}: </Text>
+          <Text color={row.valueColor}>{row.value}</Text>
+        </Text>
+      );
+    case "item":
+      return (
+        <Text>
+          {"  "}
+          <Text color={row.markColor}>{row.mark}</Text>
+          <Text> {row.text}</Text>
+        </Text>
+      );
+    case "text":
+      return (
+        <Text color={row.color} dimColor={row.dim}>
+          {row.text || " "}
+        </Text>
+      );
+    case "blank":
+      return <Text> </Text>;
+  }
 }
 
-function ClaudeBlock({ perms }: { perms: ClaudePermissions }) {
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text>
-        <Text dimColor>source: </Text>
-        <Text>{perms.source}</Text>
-      </Text>
-      <Text>
-        <Text dimColor>defaultMode: </Text>
-        <Text color={modeColor(perms.defaultMode)}>{perms.defaultMode}</Text>
-      </Text>
+function buildRows(
+  claude: ClaudePermissions[],
+  cursor: CursorStatus | undefined,
+  openclaw: OpenClawConfig | null,
+): Row[] {
+  const rows: Row[] = [];
 
-      <Box flexDirection="column" marginTop={1}>
-        <Text bold color="green">CAN ({perms.allow.length})</Text>
-        {perms.allow.length === 0 ? (
-          <Text dimColor>  (none — defaultMode applies)</Text>
-        ) : (
-          perms.allow.map((a, i) => (
-            <Text key={i}>  <Text color="green">✓</Text> {a}</Text>
-          ))
-        )}
-      </Box>
+  // ─── Claude ───────────────────────────────────────────────────────────
+  rows.push({ kind: "h1", text: "Claude Code", color: "cyan" });
+  if (claude.length === 0) {
+    rows.push({ kind: "text", text: "  No settings.json found.", dim: true });
+  } else {
+    for (const perms of claude) {
+      rows.push({ kind: "blank" });
+      rows.push({ kind: "kv", label: "source", value: perms.source });
+      rows.push({
+        kind: "kv",
+        label: "defaultMode",
+        value: perms.defaultMode,
+        valueColor: modeColor(perms.defaultMode),
+      });
+      rows.push({ kind: "blank" });
+      rows.push({
+        kind: "h2",
+        text: `CAN (${perms.allow.length})`,
+        color: "green",
+      });
+      if (perms.allow.length === 0) {
+        rows.push({
+          kind: "text",
+          text: "  (none — defaultMode applies)",
+          dim: true,
+        });
+      } else {
+        for (const a of perms.allow)
+          rows.push({ kind: "item", mark: "✓", markColor: "green", text: a });
+      }
+      rows.push({ kind: "blank" });
+      rows.push({
+        kind: "h2",
+        text: `CANNOT (${perms.deny.length})`,
+        color: "red",
+      });
+      if (perms.deny.length === 0) {
+        rows.push({
+          kind: "text",
+          text: "  (none — no explicit denies)",
+          dim: true,
+        });
+      } else {
+        for (const d of perms.deny)
+          rows.push({ kind: "item", mark: "✗", markColor: "red", text: d });
+      }
+      if (perms.flags.length > 0) {
+        rows.push({ kind: "blank" });
+        rows.push({ kind: "h2", text: "⚠ Flags", color: "yellow" });
+        for (const f of perms.flags) {
+          rows.push({
+            kind: "item",
+            mark: f.level === "risk" ? "✗" : "!",
+            markColor: f.level === "risk" ? "red" : "yellow",
+            text: f.message,
+          });
+        }
+      }
+    }
+  }
 
-      <Box flexDirection="column" marginTop={1}>
-        <Text bold color="red">CANNOT ({perms.deny.length})</Text>
-        {perms.deny.length === 0 ? (
-          <Text dimColor>  (none — no explicit denies)</Text>
-        ) : (
-          perms.deny.map((d, i) => (
-            <Text key={i}>  <Text color="red">✗</Text> {d}</Text>
-          ))
-        )}
-      </Box>
+  // ─── Cursor ───────────────────────────────────────────────────────────
+  rows.push({ kind: "blank" });
+  rows.push({ kind: "h1", text: "Cursor", color: "magenta" });
+  if (!cursor?.installed) {
+    rows.push({ kind: "text", text: "  not detected", dim: true });
+  } else {
+    rows.push({ kind: "blank" });
+    if (cursor.permissions) {
+      rows.push({
+        kind: "kv",
+        label: "approvalMode",
+        value: cursor.permissions.approvalMode,
+        valueColor: modeColor(cursor.permissions.approvalMode),
+      });
+      rows.push({
+        kind: "kv",
+        label: "sandbox",
+        value: cursor.permissions.sandboxMode,
+        valueColor:
+          cursor.permissions.sandboxMode === "disabled" ? "red" : "green",
+      });
+      rows.push({
+        kind: "text",
+        text: `  allow: ${cursor.permissions.allowCount}   deny: ${cursor.permissions.denyCount}`,
+      });
+    }
+    rows.push({
+      kind: "kv",
+      label: "MCP servers",
+      value:
+        cursor.mcpServers.length === 0
+          ? "none"
+          : `${cursor.mcpServers.length} (${cursor.mcpServers.join(", ")})`,
+    });
+    rows.push({
+      kind: "kv",
+      label: ".cursorrules discovered",
+      value: String(cursor.cursorRulesFiles.length),
+    });
+    for (const f of cursor.cursorRulesFiles.slice(0, 10))
+      rows.push({ kind: "text", text: `  • ${f}`, dim: true });
+  }
 
-      {perms.flags.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text bold color="yellow">⚠ Flags</Text>
-          {perms.flags.map((f, i) => (
-            <Text key={i} color={f.level === "risk" ? "red" : "yellow"}>
-              {"  "}{f.level === "risk" ? "✗" : "!"} {f.message}
-            </Text>
-          ))}
-        </Box>
-      )}
-    </Box>
-  );
-}
+  // ─── OpenClaw ─────────────────────────────────────────────────────────
+  rows.push({ kind: "blank" });
+  rows.push({ kind: "h1", text: "OpenClaw", color: "yellow" });
+  if (!openclaw) {
+    rows.push({ kind: "text", text: "  not detected", dim: true });
+  } else {
+    rows.push({ kind: "blank" });
+    rows.push({ kind: "kv", label: "source", value: openclaw.source });
+    if (openclaw.defaultWorkspace) {
+      rows.push({
+        kind: "kv",
+        label: "default workspace",
+        value: openclaw.defaultWorkspace,
+      });
+    }
+    rows.push({
+      kind: "text",
+      text: "  OpenClaw runs with broad shell + file access per agent. No allow/deny list — scope is the workspace path.",
+      dim: true,
+    });
+    rows.push({ kind: "blank" });
+    rows.push({
+      kind: "h2",
+      text: `Sub-agents (${openclaw.agents.length})`,
+    });
+    if (openclaw.agents.length === 0) {
+      rows.push({ kind: "text", text: "  (none configured)", dim: true });
+    } else {
+      for (const a of openclaw.agents) {
+        rows.push({ kind: "blank" });
+        rows.push({
+          kind: "text",
+          text: `${a.emoji ?? "•"} ${a.name ?? a.id} (id: ${a.id}${a.default ? ", default" : ""})`,
+        });
+        if (a.model) rows.push({ kind: "text", text: `  model: ${a.model}`, dim: true });
+        if (a.workspace)
+          rows.push({ kind: "text", text: `  workspace: ${a.workspace}`, dim: true });
+      }
+    }
+  }
 
-// ─── Cursor ─────────────────────────────────────────────────────────────────
+  rows.push({ kind: "blank" });
+  rows.push({
+    kind: "text",
+    text: "Gemini CLI exposes no permission model beyond auth, so it is omitted.",
+    dim: true,
+  });
 
-function CursorSection({ cursor }: { cursor?: CursorStatus }) {
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold color="magenta">━ Cursor ━</Text>
-      {!cursor?.installed ? (
-        <Text dimColor>  not detected</Text>
-      ) : (
-        <Box flexDirection="column" marginTop={1}>
-          {cursor.permissions ? (
-            <>
-              <Text>
-                <Text dimColor>approvalMode: </Text>
-                <Text color={modeColor(cursor.permissions.approvalMode)}>
-                  {cursor.permissions.approvalMode}
-                </Text>
-                <Text dimColor>   sandbox: </Text>
-                <Text
-                  color={
-                    cursor.permissions.sandboxMode === "disabled" ? "red" : "green"
-                  }
-                >
-                  {cursor.permissions.sandboxMode}
-                </Text>
-              </Text>
-              <Text>
-                <Text color="green">CAN:</Text>{" "}
-                <Text>{cursor.permissions.allowCount}</Text>{" "}
-                <Text color="red">CANNOT:</Text>{" "}
-                <Text>{cursor.permissions.denyCount}</Text>
-              </Text>
-            </>
-          ) : (
-            <Text dimColor>  cli-config.json not parseable</Text>
-          )}
-          <Text>
-            <Text dimColor>MCP servers: </Text>
-            <Text>
-              {cursor.mcpServers.length === 0
-                ? "none"
-                : `${cursor.mcpServers.length} (${cursor.mcpServers.join(", ")})`}
-            </Text>
-          </Text>
-          <Text>
-            <Text dimColor>.cursorrules discovered: </Text>
-            <Text>{cursor.cursorRulesFiles.length}</Text>
-          </Text>
-          {cursor.cursorRulesFiles.slice(0, 5).map((f, i) => (
-            <Text key={i} dimColor>  • {f}</Text>
-          ))}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-// ─── OpenClaw ───────────────────────────────────────────────────────────────
-
-function OpenClawSection({ config }: { config: OpenClawConfig | null }) {
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold color="yellow">━ OpenClaw ━</Text>
-      {!config ? (
-        <Text dimColor>  not detected</Text>
-      ) : (
-        <Box flexDirection="column" marginTop={1}>
-          <Text>
-            <Text dimColor>source: </Text>
-            <Text>{config.source}</Text>
-          </Text>
-          {config.defaultWorkspace && (
-            <Text>
-              <Text dimColor>default workspace: </Text>
-              <Text>{config.defaultWorkspace}</Text>
-            </Text>
-          )}
-          <Text dimColor>
-            {"  "}OpenClaw runs with broad shell + file access per agent. No
-            allow/deny list — scope is controlled by the workspace path.
-          </Text>
-          <Box flexDirection="column" marginTop={1}>
-            <Text bold>Sub-agents ({config.agents.length})</Text>
-            {config.agents.length === 0 ? (
-              <Text dimColor>  (none configured)</Text>
-            ) : (
-              config.agents.map((a) => (
-                <Box key={a.id} flexDirection="column" marginTop={1}>
-                  <Text>
-                    {a.emoji ? `${a.emoji} ` : ""}
-                    <Text bold>{a.name ?? a.id}</Text>
-                    <Text dimColor> (id: {a.id}{a.default ? ", default" : ""})</Text>
-                  </Text>
-                  {a.model && (
-                    <Text dimColor>  model: {a.model}</Text>
-                  )}
-                  {a.workspace && (
-                    <Text dimColor>  workspace: {a.workspace}</Text>
-                  )}
-                </Box>
-              ))
-            )}
-          </Box>
-        </Box>
-      )}
-    </Box>
-  );
+  return rows;
 }
 
 function modeColor(mode: string): string {
   if (mode === "auto" || mode === "bypassPermissions") return "red";
   if (mode === "ask" || mode === "allowlist") return "green";
   return "yellow";
+}
+
+/** Row count so callers can compute scroll bounds. */
+export function permissionRowCount(
+  claude: ClaudePermissions[],
+  cursor: CursorStatus | undefined,
+  openclaw: OpenClawConfig | null,
+): number {
+  return buildRows(claude, cursor, openclaw).length;
 }
