@@ -61,3 +61,81 @@ export function agoFromNow(iso: string): string {
   if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
   return `${Math.floor(diff / 86400_000)}d ago`;
 }
+
+export interface SessionRow {
+  sessionId: string;
+  agent: AgentName;
+  /** Sub-agent label for OpenClaw (content/research/etc.). */
+  subAgent?: string;
+  project: string;
+  firstPrompt: string;
+  events: number;
+  firstTs: string;
+  lastTs: string;
+  cost: number;
+  hasError: boolean;
+}
+
+/** Return one row per session in a given project, newest first. */
+export function buildSessionRows(
+  events: AgentEvent[],
+  project: string,
+): SessionRow[] {
+  const byId = new Map<string, SessionRow>();
+  for (const e of events) {
+    const p = (e.summary ?? "").match(/^\[([^\]/ ]+)/)?.[1];
+    if (p !== project) continue;
+    const sid = e.sessionId;
+    if (!sid) continue;
+    let row = byId.get(sid);
+    if (!row) {
+      row = {
+        sessionId: sid,
+        agent: e.agent,
+        subAgent: extractSubAgent(e),
+        project,
+        firstPrompt: "",
+        events: 0,
+        firstTs: e.ts,
+        lastTs: e.ts,
+        cost: 0,
+        hasError: false,
+      };
+      byId.set(sid, row);
+    }
+    row.events += 1;
+    if (e.ts < row.firstTs) row.firstTs = e.ts;
+    if (e.ts > row.lastTs) row.lastTs = e.ts;
+    if (e.details?.cost) row.cost += e.details.cost;
+    if (e.details?.toolError) row.hasError = true;
+    if (!row.firstPrompt && e.type === "prompt" && e.details?.fullText) {
+      row.firstPrompt = e.details.fullText.trim().slice(0, 200);
+    }
+  }
+  const rows = Array.from(byId.values());
+  rows.sort((a, b) => (a.lastTs < b.lastTs ? 1 : -1));
+  return rows;
+}
+
+/** Classic relative date bucket for session grouping. */
+export function dateBucket(iso: string): "today" | "yesterday" | "7d" | "older" {
+  const then = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - then.getTime();
+  const sameDay =
+    then.getFullYear() === now.getFullYear() &&
+    then.getMonth() === now.getMonth() &&
+    then.getDate() === now.getDate();
+  if (sameDay) return "today";
+  if (diffMs < 48 * 3600_000) return "yesterday";
+  if (diffMs < 7 * 86400_000) return "7d";
+  return "older";
+}
+
+function extractSubAgent(e: AgentEvent): string | undefined {
+  const tool = e.tool ?? "";
+  // openclaw:content / openclaw:research / openclaw:content:Bash
+  const m = tool.match(/^openclaw:([^:]+)/);
+  if (m) return m[1];
+  return undefined;
+}
