@@ -4,7 +4,7 @@ import type { AgentEvent, AgentName, EventDetails, EventSink } from "../schema.j
 import { Timeline } from "./Timeline.js";
 import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
-import { PermissionView } from "./PermissionView.js";
+import { PermissionView, permissionRowCount } from "./PermissionView.js";
 import { EventDetail, totalDetailRows } from "./EventDetail.js";
 import { ProjectsView } from "./ProjectsView.js";
 import { buildProjectIndex } from "../util/project-index.js";
@@ -68,6 +68,8 @@ type State = {
   projectsSelectedIdx: number;
   /** Current project filter applied to the timeline */
   projectFilter: string | null;
+  /** Scroll offset for the permissions view */
+  permissionsScroll: number;
 };
 
 type Action =
@@ -84,6 +86,7 @@ type Action =
   | { type: "scroll-detail"; delta: number; max: number }
   | { type: "open-search" }
   | { type: "close-search" }
+  | { type: "confirm-search" }
   | { type: "search-input"; char: string }
   | { type: "search-backspace" }
   | { type: "scope-subagent"; subAgentId: string }
@@ -91,7 +94,8 @@ type Action =
   | { type: "toggle-projects" }
   | { type: "projects-move"; delta: number; max: number }
   | { type: "projects-select"; name: string }
-  | { type: "set-project-filter"; project: string | null };
+  | { type: "set-project-filter"; project: string | null }
+  | { type: "scroll-permissions"; delta: number; max: number };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -121,7 +125,11 @@ function reducer(state: State, action: Action): State {
     case "toggle-agents":
       return { ...state, showAgents: !state.showAgents };
     case "toggle-permissions":
-      return { ...state, showPermissions: !state.showPermissions };
+      return {
+        ...state,
+        showPermissions: !state.showPermissions,
+        permissionsScroll: 0,
+      };
     case "cycle-filter": {
       const idx = state.filterAgent
         ? action.agents.indexOf(state.filterAgent)
@@ -153,6 +161,9 @@ function reducer(state: State, action: Action): State {
       return { ...state, searchOpen: true, selectedIdx: null };
     case "close-search":
       return { ...state, searchOpen: false, searchQuery: "" };
+    case "confirm-search":
+      // Exit input mode but keep the query as a sticky filter.
+      return { ...state, searchOpen: false };
     case "search-input":
       return {
         ...state,
@@ -199,6 +210,10 @@ function reducer(state: State, action: Action): State {
       };
     case "set-project-filter":
       return { ...state, projectFilter: action.project, selectedIdx: null };
+    case "scroll-permissions": {
+      const next = Math.max(0, Math.min(action.max, state.permissionsScroll + action.delta));
+      return { ...state, permissionsScroll: next };
+    }
   }
 }
 
@@ -227,6 +242,7 @@ export function App() {
     projectsOpen: false,
     projectsSelectedIdx: 0,
     projectFilter: null,
+    permissionsScroll: 0,
   });
 
   useEffect(() => {
@@ -301,13 +317,7 @@ export function App() {
         return;
       }
       if (key.return) {
-        // Keep the query applied as a sticky filter; just exit input mode.
-        // We signal this by dispatching close-search and immediately restoring
-        // the query — simpler: the reducer's close-search clears the query,
-        // so instead we add a dedicated confirm action. But for MVP, the
-        // behaviour "Enter applies + exits" is achieved by flipping a flag
-        // only: we leave searchOpen true visually (no cursor). Simplest
-        // correct behaviour: Enter does nothing destructive, esc closes.
+        dispatch({ type: "confirm-search" });
         return;
       }
       if (key.backspace || key.delete) {
@@ -345,6 +355,26 @@ export function App() {
         if (p) dispatch({ type: "projects-select", name: p.name });
         return;
       }
+      return;
+    }
+
+    if (state.showPermissions) {
+      const total = permissionRowCount(claudePerms, cursorStatus, openclawCfg);
+      const viewport = Math.max(3, rows - 8);
+      const maxScroll = Math.max(0, total - viewport);
+      if (key.escape || input === "p") {
+        dispatch({ type: "toggle-permissions" });
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        dispatch({ type: "scroll-permissions", delta: 1, max: maxScroll });
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        dispatch({ type: "scroll-permissions", delta: -1, max: maxScroll });
+        return;
+      }
+      // Also let q quit from the permissions screen
       return;
     }
 
@@ -422,6 +452,8 @@ export function App() {
           claude={claudePerms}
           cursor={cursorStatus}
           openclaw={openclawCfg}
+          viewportRows={Math.max(3, rows - 8)}
+          scrollOffset={state.permissionsScroll}
         />
       ) : (
         <Box flexDirection="row">
