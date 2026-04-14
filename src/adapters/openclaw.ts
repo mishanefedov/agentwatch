@@ -105,7 +105,8 @@ function processAudit(
   });
 }
 
-const BACKFILL_BYTES = 64 * 1024; // last 64KB on first add
+/** Same backfill window as Claude adapter; see its comment. */
+const BACKFILL_BYTES = 4 * 1024 * 1024;
 
 function streamLines(
   file: string,

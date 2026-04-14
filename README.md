@@ -384,9 +384,16 @@ custom notification triggers and budget alarms.
 
 ## Limitations
 
-- **Backfill isn't unbounded.** agentwatch reads the last ~64 KB of each
-  session file on startup. Older events still live in your jsonl — open
-  them directly if you need deeper history.
+- **agentwatch is a viewer, not a daemon.** It only captures events while
+  the TUI is running. If you close it and use Claude for two hours,
+  those events are written to disk normally but aren't streamed into
+  agentwatch's live timeline.
+- **Backfill is bounded.** When you (re)open agentwatch, it reads the
+  last ~4 MB of each active session file — roughly hundreds of events.
+  For long gaps plus very active sessions, the earliest events in a
+  session may fall out of the backfill window. Keep agentwatch open in
+  a tmux pane if you want zero gaps. A background-daemon mode is on
+  the v0.5 roadmap.
 - **Cursor activity is config-level only.** Cursor stores its full AI
   activity in a SQLite DB we don't parse yet. We capture config changes +
   recently-viewed files as a live signal. Full activity parsing is planned.
