@@ -15,7 +15,7 @@ describe("translateClaudeLine", () => {
     expect(e?.summary).toContain("help me debug");
   });
 
-  it("emits a tool_call with elevated risk for a Bash tool_use", () => {
+  it("emits shell_exec with elevated risk for a Bash tool_use", () => {
     const line = {
       type: "assistant",
       timestamp: "2026-04-14T10:00:01.000Z",
@@ -27,8 +27,21 @@ describe("translateClaudeLine", () => {
       },
     };
     const e = translateClaudeLine(line, "sess-1");
-    expect(e?.type).toBe("tool_call");
+    expect(e?.type).toBe("shell_exec");
     expect(e?.agent).toBe("claude-code");
+    expect(e?.tool).toBe("Bash");
+    expect(e?.cmd).toBe("rm -rf /tmp/x");
+    expect(e?.summary).toContain("Bash: rm -rf /tmp/x");
+    expect(e?.riskScore).toBeGreaterThanOrEqual(9);
+  });
+
+  it("suppresses empty assistant messages", () => {
+    const line = {
+      type: "assistant",
+      timestamp: "2026-04-14T10:00:05.000Z",
+      message: { role: "assistant", content: [] },
+    };
+    expect(translateClaudeLine(line, "sess-1")).toBeNull();
   });
 
   it("emits a response for an assistant text message", () => {

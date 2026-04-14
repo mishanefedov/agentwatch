@@ -241,6 +241,7 @@ export function translateSession(
           summary: truncate(toolUse.summary),
         });
       }
+      if (!text) return null; // suppress empty assistant messages
       return base("response", { summary: truncate(text) });
     }
   }
