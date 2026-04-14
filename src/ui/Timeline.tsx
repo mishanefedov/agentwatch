@@ -4,9 +4,14 @@ import type { AgentEvent, AgentName } from "../schema.js";
 interface Props {
   events: AgentEvent[];
   selectedIdx?: number | null;
+  childCountByAgentId?: Map<string, number>;
 }
 
-export function Timeline({ events, selectedIdx }: Props) {
+export function Timeline({
+  events,
+  selectedIdx,
+  childCountByAgentId,
+}: Props) {
   const header = (
     <Box>
       <Text bold dimColor>
@@ -48,22 +53,37 @@ export function Timeline({ events, selectedIdx }: Props) {
           key={e.id}
           event={e}
           selected={windowStart + i === selectedIdx}
+          childCount={
+            e.details?.subAgentId
+              ? (childCountByAgentId?.get(e.details.subAgentId) ?? 0)
+              : 0
+          }
         />
       ))}
     </Box>
   );
 }
 
-function EventRow({ event, selected }: { event: AgentEvent; selected: boolean }) {
+function EventRow({
+  event,
+  selected,
+  childCount,
+}: {
+  event: AgentEvent;
+  selected: boolean;
+  childCount: number;
+}) {
   const time = event.ts.slice(11, 19);
-  const line = event.summary ?? event.path ?? event.cmd ?? event.tool ?? event.type;
+  const baseLine = event.summary ?? event.path ?? event.cmd ?? event.tool ?? event.type;
+  const marker = childCount > 0 ? ` ▸ ${childCount} child events` : "";
   return (
     <Box>
       <Text wrap="truncate" inverse={selected}>
         <Text dimColor>{time} </Text>
         <Text color={agentColor(event.agent)}>{pad(event.agent, 10)} </Text>
         <Text color={riskColor(event.riskScore)}>{pad(event.type, 13)} </Text>
-        <Text>{line}</Text>
+        <Text>{baseLine}</Text>
+        {childCount > 0 && <Text color="yellow">{marker}</Text>}
       </Text>
     </Box>
   );

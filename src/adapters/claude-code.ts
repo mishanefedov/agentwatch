@@ -185,29 +185,38 @@ function handleToolResults(
     const id = typeof b.tool_use_id === "string" ? b.tool_use_id : undefined;
     if (!id) continue;
     const isError = b.is_error === true;
-    const content = flattenResultContent(b.content);
+    const resultText = flattenResultContent(b.content);
+    const subAgentId = extractSubAgentIdFromResult(resultText);
     const pending = pendingToolUses.get(id);
     if (pending) {
       pendingToolUses.delete(id);
       enrich(pending.eventId, {
-        toolResult: content,
+        toolResult: resultText,
         toolError: isError,
         durationMs: Math.max(
           0,
           new Date(ts).getTime() - new Date(pending.ts).getTime(),
         ),
+        ...(subAgentId ? { subAgentId } : {}),
       });
     } else {
-      // tool_result seen before tool_use (possible during backfill).
-      // Stash for up to 10 minutes.
-      orphanResults.set(id, { ts, content, isError });
+      orphanResults.set(id, { ts, content: resultText, isError });
       if (orphanResults.size > 1000) {
-        // cap memory — drop the oldest entries
         const first = orphanResults.keys().next().value;
         if (first) orphanResults.delete(first);
       }
     }
   }
+}
+
+/** When Claude's Agent tool returns, the result text includes a line like
+ *  `agentId: ab3c99fca44a218cb` or an embedded JSON `"agentId":"..."`.
+ *  Used to map a parent Agent tool_use event to its subagent session. */
+function extractSubAgentIdFromResult(text: string): string | undefined {
+  const m =
+    text.match(/agentId[":\s]+([a-f0-9]{16,})/) ||
+    text.match(/agent-([a-f0-9]{16,})/);
+  return m?.[1];
 }
 
 function flattenResultContent(content: unknown): string {

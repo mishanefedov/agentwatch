@@ -46,6 +46,9 @@ export interface EventDetails {
   durationMs?: number;
   /** True if the matched tool_result had is_error set. */
   toolError?: boolean;
+  /** Subagent id extracted from a Claude `Agent` tool_result.
+   *  Events spawned by that run are stored in sessionId = `agent-<id>`. */
+  subAgentId?: string;
 }
 
 /** Sink passed to adapters. Adapters emit new events and may later
