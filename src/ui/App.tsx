@@ -9,6 +9,7 @@ import { EventDetail, totalDetailRows } from "./EventDetail.js";
 import { ProjectsView } from "./ProjectsView.js";
 import { SessionsView, sessionLineCount } from "./SessionsView.js";
 import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
+import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
@@ -77,6 +78,8 @@ type State = {
   sessionsScroll: number;
   /** Scoped session filter (timeline shows only this sessionId) */
   sessionFilter: string | null;
+  /** Transient message shown at the footer for ~2s (e.g. after a yank). */
+  flashMessage: string | null;
 };
 
 type Action =
@@ -103,6 +106,8 @@ type Action =
   | { type: "projects-select"; name: string }
   | { type: "set-project-filter"; project: string | null }
   | { type: "scroll-permissions"; delta: number; max: number }
+  | { type: "flash"; text: string }
+  | { type: "flash-clear" }
   | { type: "open-sessions"; project: string }
   | { type: "close-sessions" }
   | { type: "sessions-move"; delta: number; max: number }
@@ -255,6 +260,10 @@ function reducer(state: State, action: Action): State {
         sessionsForProject: null,
         selectedIdx: null,
       };
+    case "flash":
+      return { ...state, flashMessage: action.text };
+    case "flash-clear":
+      return { ...state, flashMessage: null };
   }
 }
 
@@ -288,6 +297,7 @@ export function App() {
     sessionsSelectedIdx: 0,
     sessionsScroll: 0,
     sessionFilter: null,
+    flashMessage: null,
   });
 
   useEffect(() => {
@@ -487,6 +497,26 @@ export function App() {
       if (sid) dispatch({ type: "scope-subagent", subAgentId: sid });
     }
     if (input === "X") dispatch({ type: "unscope-subagent" });
+    if (input === "y" && state.selectedIdx !== null) {
+      const ev = filtered[state.selectedIdx];
+      if (ev) {
+        const text = eventToYankText(
+          ev.summary,
+          ev.path,
+          ev.cmd,
+          ev.details?.toolResult,
+          ev.details?.fullText,
+        );
+        if (text) {
+          const res = copyToClipboard(text);
+          const message = res.ok
+            ? `✓ copied ${text.length} chars to clipboard`
+            : `✗ ${res.reason}`;
+          dispatch({ type: "flash", text: message });
+          setTimeout(() => dispatch({ type: "flash-clear" }), 2000);
+        }
+      }
+    }
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") {
       dispatch({ type: "set-project-filter", project: null });
@@ -569,6 +599,11 @@ export function App() {
         </Box>
       )}
       <Box marginTop={1} flexDirection="column">
+        {state.flashMessage && (
+          <Text color={state.flashMessage.startsWith("✓") ? "green" : "red"}>
+            {state.flashMessage}
+          </Text>
+        )}
         {state.sessionFilter && (
           <Text>
             <Text color="yellow">↳ session </Text>
@@ -609,7 +644,7 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[q] quit  [↑↓] select  [enter] detail  [P] projects  [x] subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
+                : `[q] quit  [↑↓] select  [enter] detail  [y] yank  [P] projects  [x] subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
         </Text>
       </Box>
     </Box>
