@@ -10,6 +10,43 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+## [0.0.2] — 2026-04-14
+
+### Fixed
+- **Claude adapter silently reading zero events.** chokidar v4 dropped glob
+  support; the `${dir}/**/*.jsonl` pattern never fired. Now watches the
+  projects dir recursively with a path-regex filter. Live smoke surfaced
+  thousands of events where 0.0.1 showed none.
+- **EMFILE crash** after ~30 seconds of real use. Reduced FS watcher depth
+  from 8 → 3, expanded the ignore list (coverage, `.venv`, `__pycache__`,
+  `.turbo`, lock files), and replaced Cursor's recursive workspace watcher
+  with a one-shot shallow discovery + per-file watcher. All adapters now
+  silently swallow EMFILE / ENOSPC / EACCES instead of crashing.
+- **`q` felt laggy.** chokidar's close waits on pending FDs; we now force
+  `process.exit(0)` on quit so the shell returns immediately.
+- **Timeline rendered in arrival order** (backfill out of order). Events
+  are now binary-inserted by `ts` so the view is strictly reverse-
+  chronological regardless of which file arrived first.
+- **Empty-content events polluted the timeline.** Assistant messages with
+  no text and no tool_use, and user turns made up only of tool_results,
+  are now suppressed.
+
+### Added
+- **Project prefix on every event** — `[auraqu]`, `[_content_agent_]`,
+  `[reachout]`. Claude events derive the project from the session path;
+  OpenClaw tracks cwd per session from `session_start`; Cursor uses path
+  heuristics. Finally makes it possible to see *where* each agent is
+  working at a glance.
+- **Rich Claude tool_use summaries** — Bash tool uses render as
+  `Bash: <command>` with correct `shell_exec` type and risk scoring;
+  Read/Write/Edit/MultiEdit render as `<Tool>: <path>`; Grep/Glob include
+  the pattern; Task includes the description; WebFetch includes the URL.
+- **Sticky column header** at the top of the timeline (`TIME / AGENT /
+  TYPE / EVENT`).
+- **Alt-screen buffer** — agentwatch now takes over the viewport on
+  startup and restores the shell scrollback on exit. Standard TUI
+  behaviour (lazygit / k9s / htop).
+
 ## [0.0.1] — 2026-04-14
 
 ### Added
