@@ -1,6 +1,6 @@
 {
   "name": "@misha_misha/agentwatch",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Local-only observability for AI coding agents. See what Claude, Codex, Cursor, Gemini, and OpenClaw are touching on your machine — in one timeline.",
   "type": "module",
   "author": "Misha Nefedov",
