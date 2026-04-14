@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { basename, sep } from "node:path";
 import type { AgentEvent, EventType, EventSink } from "../schema.js";
-import { riskOf } from "../schema.js";
+import { clampTs, riskOf } from "../schema.js";
 import { claudeProjectsDir } from "../util/workspace.js";
 import { nextId } from "../util/ids.js";
 import { costOf, parseUsage } from "../util/cost.js";
@@ -13,11 +13,22 @@ type Emit = EventSink | ((e: AgentEvent) => void);
 
 // Shared across the adapter's lifetime so pairing survives backfill
 // arriving out of order (multiple sessions emit into the same maps).
+// Bounded to prevent unbounded growth when tool_result never arrives
+// (agent crashed mid-turn, corrupted session file, etc).
+const MAX_PENDING_TOOL_USES = 5000;
 const pendingToolUses = new Map<string, { eventId: string; ts: string }>();
 const orphanResults = new Map<
   string,
   { ts: string; content: string; isError: boolean }
 >();
+
+function capMap<K, V>(m: Map<K, V>, max: number): void {
+  while (m.size > max) {
+    const first = m.keys().next().value;
+    if (first === undefined) break;
+    m.delete(first);
+  }
+}
 
 interface FileCursor {
   offset: number;
@@ -113,6 +124,7 @@ export function startClaudeAdapter(sink: Emit): () => void {
               eventId: event.id,
               ts: event.ts,
             });
+            capMap(pendingToolUses, MAX_PENDING_TOOL_USES);
           }
         }
       } catch {
@@ -227,8 +239,11 @@ function extractSubAgentIdFromResult(text: string): string | undefined {
   return m?.[1];
 }
 
+const MAX_TOOL_RESULT_BYTES = 256 * 1024; // 256 KB hard cap; Bash stdout of a
+// huge `find /` or `cat huge.log` otherwise blows up our memory.
+
 function flattenResultContent(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return capBytes(content);
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
   for (const c of content) {
@@ -239,7 +254,16 @@ function flattenResultContent(content: unknown): string {
       if (typeof rec.text === "string") parts.push(rec.text);
     }
   }
-  return parts.join("\n");
+  return capBytes(parts.join("\n"));
+}
+
+function capBytes(s: string, max = MAX_TOOL_RESULT_BYTES): string {
+  if (s.length <= max) return s;
+  const truncated = s.length - max;
+  return (
+    s.slice(0, max) +
+    `\n\n… [${truncated.toLocaleString()} bytes truncated]`
+  );
 }
 
 function safeSize(file: string): number {
@@ -258,9 +282,10 @@ export function translateClaudeLine(
 ): AgentEvent | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
-  const ts =
+  const ts = clampTs(
     (typeof o.timestamp === "string" && o.timestamp) ||
-    new Date().toISOString();
+      new Date().toISOString(),
+  );
   const tagParts: string[] = [];
   if (project) tagParts.push(project);
   if (subAgentId) tagParts.push(`sub:${subAgentId.slice(0, 8)}`);

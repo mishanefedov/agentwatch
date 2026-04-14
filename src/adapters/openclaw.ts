@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { basename, join, sep } from "node:path";
 import { homedir } from "node:os";
 import type { AgentEvent, EventType } from "../schema.js";
-import { riskOf } from "../schema.js";
+import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 
 import type { EventSink } from "../schema.js";
@@ -176,9 +176,10 @@ export function translateSession(
 ): AgentEvent | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
-  const ts =
+  const ts = clampTs(
     (typeof o.timestamp === "string" && o.timestamp) ||
-    new Date().toISOString();
+      new Date().toISOString(),
+  );
   const t = o.type;
 
   const projectLabel = () => {
@@ -262,8 +263,9 @@ export function translateSession(
 export function translateAudit(obj: unknown): AgentEvent | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
-  const ts =
-    (typeof o.ts === "string" && o.ts) || new Date().toISOString();
+  const ts = clampTs(
+    (typeof o.ts === "string" && o.ts) || new Date().toISOString(),
+  );
   const event = typeof o.event === "string" ? o.event : "config.event";
   const configPath = typeof o.configPath === "string" ? o.configPath : undefined;
   const cwd = typeof o.cwd === "string" ? o.cwd : undefined;
