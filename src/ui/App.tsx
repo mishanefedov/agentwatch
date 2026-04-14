@@ -63,8 +63,6 @@ type State = {
   /** When set, timeline is scoped to events whose sessionId ends with
    *  `agent-<subAgentScope>` OR whose details.subAgentId === scope. */
   subAgentScope: string | null;
-  /** Event ids whose inline expansion is currently open. */
-  expandedIds: Set<string>;
   /** Projects-picker view state */
   projectsOpen: boolean;
   projectsSelectedIdx: number;
@@ -90,7 +88,6 @@ type Action =
   | { type: "search-backspace" }
   | { type: "scope-subagent"; subAgentId: string }
   | { type: "unscope-subagent" }
-  | { type: "toggle-expand"; eventId: string }
   | { type: "toggle-projects" }
   | { type: "projects-move"; delta: number; max: number }
   | { type: "projects-select"; name: string }
@@ -177,12 +174,6 @@ function reducer(state: State, action: Action): State {
       };
     case "unscope-subagent":
       return { ...state, subAgentScope: null, selectedIdx: null };
-    case "toggle-expand": {
-      const next = new Set(state.expandedIds);
-      if (next.has(action.eventId)) next.delete(action.eventId);
-      else next.add(action.eventId);
-      return { ...state, expandedIds: next };
-    }
     case "toggle-projects":
       return {
         ...state,
@@ -233,7 +224,6 @@ export function App() {
     searchOpen: false,
     searchQuery: "",
     subAgentScope: null,
-    expandedIds: new Set<string>(),
     projectsOpen: false,
     projectsSelectedIdx: 0,
     projectFilter: null,
@@ -379,15 +369,6 @@ export function App() {
       const sid = ev?.details?.subAgentId;
       if (sid) dispatch({ type: "scope-subagent", subAgentId: sid });
     }
-    if ((key.rightArrow || input === "o") && state.selectedIdx !== null) {
-      const ev = filtered[state.selectedIdx];
-      if (ev) dispatch({ type: "toggle-expand", eventId: ev.id });
-    }
-    if (key.leftArrow && state.selectedIdx !== null) {
-      const ev = filtered[state.selectedIdx];
-      if (ev && state.expandedIds.has(ev.id))
-        dispatch({ type: "toggle-expand", eventId: ev.id });
-    }
     if (input === "X") dispatch({ type: "unscope-subagent" });
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") dispatch({ type: "set-project-filter", project: null });
@@ -449,7 +430,6 @@ export function App() {
               events={filtered}
               selectedIdx={state.selectedIdx}
               childCountByAgentId={childCountByAgentId}
-              expandedIds={state.expandedIds}
             />
           </Box>
           {state.showAgents && (
@@ -491,7 +471,7 @@ export function App() {
               ? "[↑↓] select project  [enter] filter  [esc] close"
               : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[q] quit  [↑↓] select  [→] expand  [enter] detail  [P] projects  [x] subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
+                : `[q] quit  [↑↓] select  [enter] detail  [P] projects  [x] subagent  [/] search  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
         </Text>
       </Box>
     </Box>
