@@ -34,7 +34,13 @@ export function copyToClipboard(text: string): ClipboardResult {
 }
 
 function run(cmd: string, args: string[], input: string): ClipboardResult {
-  const res = spawnSync(cmd, args, { input });
+  // Explicit stdio: Ink puts stdin into raw mode so the default fd
+  // inheritance can EBADF on spawnSync. Pipe stdin (we're supplying
+  // `input`), ignore the child's stdout/stderr entirely.
+  const res = spawnSync(cmd, args, {
+    input,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
   if (res.error) return { ok: false, reason: String(res.error) };
   if (res.status !== 0)
     return { ok: false, reason: `${cmd} exited ${res.status}` };
@@ -42,7 +48,9 @@ function run(cmd: string, args: string[], input: string): ClipboardResult {
 }
 
 function commandExists(cmd: string): boolean {
-  const res = spawnSync("sh", ["-c", `command -v ${cmd}`]);
+  const res = spawnSync("sh", ["-c", `command -v ${cmd}`], {
+    stdio: ["ignore", "ignore", "ignore"],
+  });
   return res.status === 0;
 }
 
