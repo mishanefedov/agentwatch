@@ -95,7 +95,9 @@ export function notify(title: string, body: string): void {
   const os = platform();
   // Ink raw-mode TTY breaks inherited stdio on child processes; always
   // use explicit ignore stdio so the notifier never clobbers our TUI.
-  const silentStdio = { stdio: ["ignore", "ignore", "ignore"] as const };
+  const silentStdio = {
+    stdio: ["ignore", "ignore", "ignore"] as Array<"ignore">,
+  };
   try {
     if (os === "darwin") {
       const escTitle = title.replace(/"/g, '\\"');
