@@ -1,10 +1,11 @@
 import { useEffect, useReducer, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import type { AgentEvent, AgentName } from "../schema.js";
 import { Timeline } from "./Timeline.js";
 import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
 import { PermissionView } from "./PermissionView.js";
+import { EventDetail, totalDetailRows } from "./EventDetail.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
@@ -36,6 +37,10 @@ type State = {
   showAgents: boolean;
   showPermissions: boolean;
   paused: boolean;
+  /** Index into the *filtered* list; null = no selection */
+  selectedIdx: number | null;
+  detailOpen: boolean;
+  detailScroll: number;
 };
 
 type Action =
@@ -44,20 +49,26 @@ type Action =
   | { type: "toggle-permissions" }
   | { type: "cycle-filter"; agents: AgentName[] }
   | { type: "toggle-pause" }
-  | { type: "clear" };
+  | { type: "clear" }
+  | { type: "move"; delta: number; max: number }
+  | { type: "open-detail" }
+  | { type: "close-detail" }
+  | { type: "scroll-detail"; delta: number; max: number };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "event": {
       if (state.paused) return state;
-      // Insert in reverse-chronological order (newest event ts on top).
-      // Backfill arrives out-of-order so we sort on every insert rather than
-      // relying on arrival order.
       const next = state.events.slice();
       const idx = findInsertIdx(next, action.event.ts);
       next.splice(idx, 0, action.event);
       if (next.length > MAX_EVENTS) next.length = MAX_EVENTS;
-      return { ...state, events: next };
+      // If the user is currently on a selected row, keep the cursor on the
+      // same event by shifting its index when a newer event is inserted
+      // above it.
+      let sel = state.selectedIdx;
+      if (sel !== null && idx <= sel) sel = sel + 1;
+      return { ...state, events: next, selectedIdx: sel };
     }
     case "toggle-agents":
       return { ...state, showAgents: !state.showAgents };
@@ -69,12 +80,27 @@ function reducer(state: State, action: Action): State {
         : -1;
       const next =
         idx + 1 >= action.agents.length ? null : action.agents[idx + 1];
-      return { ...state, filterAgent: next ?? null };
+      return { ...state, filterAgent: next ?? null, selectedIdx: null };
     }
     case "toggle-pause":
       return { ...state, paused: !state.paused };
     case "clear":
-      return { ...state, events: [] };
+      return { ...state, events: [], selectedIdx: null };
+    case "move": {
+      if (action.max <= 0) return state;
+      const cur = state.selectedIdx ?? -1;
+      const next = Math.max(0, Math.min(action.max - 1, cur + action.delta));
+      return { ...state, selectedIdx: next };
+    }
+    case "open-detail":
+      if (state.selectedIdx === null) return state;
+      return { ...state, detailOpen: true, detailScroll: 0 };
+    case "close-detail":
+      return { ...state, detailOpen: false, detailScroll: 0 };
+    case "scroll-detail": {
+      const next = Math.max(0, Math.min(action.max, state.detailScroll + action.delta));
+      return { ...state, detailScroll: next };
+    }
   }
 }
 
@@ -87,12 +113,16 @@ export function App() {
   const [cursorStatus, setCursorStatus] = useState<CursorStatus | undefined>(
     undefined,
   );
+  const { stdout } = useStdout();
   const [state, dispatch] = useReducer(reducer, {
     events: [],
     filterAgent: null,
     showAgents: true,
     showPermissions: false,
     paused: false,
+    selectedIdx: null,
+    detailOpen: false,
+    detailScroll: 0,
   });
 
   useEffect(() => {
@@ -111,12 +141,37 @@ export function App() {
     };
   }, [workspace]);
 
+  const filtered = state.filterAgent
+    ? state.events.filter((e) => e.agent === state.filterAgent)
+    : state.events;
+
+  const cols = stdout.columns || 120;
+  const rows = stdout.rows || 30;
+  const selectedEvent =
+    state.selectedIdx !== null ? filtered[state.selectedIdx] : undefined;
+  const detailRowCount = selectedEvent
+    ? totalDetailRows(selectedEvent, cols - 6)
+    : 0;
+
   useInput((input, key) => {
     if (input === "q" || (key.ctrl && input === "c")) {
-      // Force-exit: chokidar's watcher.close() is slow and the OS will
-      // reap fds anyway. No reason to block the user at shutdown.
       exit();
       setImmediate(() => process.exit(0));
+      return;
+    }
+    if (state.detailOpen) {
+      if (key.escape || input === "q") {
+        dispatch({ type: "close-detail" });
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        dispatch({ type: "scroll-detail", delta: 1, max: Math.max(0, detailRowCount - (rows - 10)) });
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        dispatch({ type: "scroll-detail", delta: -1, max: Math.max(0, detailRowCount - (rows - 10)) });
+        return;
+      }
       return;
     }
     if (input === "a") dispatch({ type: "toggle-agents" });
@@ -130,11 +185,18 @@ export function App() {
     if (input === " ") dispatch({ type: "toggle-pause" });
     if (input === "p") dispatch({ type: "toggle-permissions" });
     if (input === "c") dispatch({ type: "clear" });
+    if (key.downArrow || input === "j")
+      dispatch({ type: "move", delta: 1, max: filtered.length });
+    if (key.upArrow || input === "k")
+      dispatch({ type: "move", delta: -1, max: filtered.length });
+    if (key.return || input === "l") dispatch({ type: "open-detail" });
+    if (key.escape) {
+      // clear selection
+      if (state.selectedIdx !== null) {
+        dispatch({ type: "move", delta: -(state.selectedIdx + 99999), max: 1 });
+      }
+    }
   });
-
-  const filtered = state.filterAgent
-    ? state.events.filter((e) => e.agent === state.filterAgent)
-    : state.events;
 
   return (
     <Box flexDirection="column">
@@ -144,7 +206,14 @@ export function App() {
         filter={state.filterAgent}
         paused={state.paused}
       />
-      {state.showPermissions ? (
+      {state.detailOpen && selectedEvent ? (
+        <EventDetail
+          event={selectedEvent}
+          width={cols}
+          height={rows - 4}
+          scrollOffset={state.detailScroll}
+        />
+      ) : state.showPermissions ? (
         <PermissionView
           claude={claudePerms}
           cursor={cursorStatus}
@@ -153,7 +222,7 @@ export function App() {
       ) : (
         <Box flexDirection="row">
           <Box flexGrow={1} flexDirection="column">
-            <Timeline events={filtered} />
+            <Timeline events={filtered} selectedIdx={state.selectedIdx} />
           </Box>
           {state.showAgents && (
             <Box width={32} marginLeft={1}>
@@ -164,7 +233,9 @@ export function App() {
       )}
       <Box marginTop={1}>
         <Text dimColor>
-          [q] quit  [a] agents  [f] filter  [p] permissions  [space] {state.paused ? "resume" : "pause"}  [c] clear
+          {state.detailOpen
+            ? "[esc] close  [↑↓] scroll"
+            : `[q] quit  [↑↓] select  [enter] detail  [a] agents  [f] filter  [p] permissions  [space] ${state.paused ? "resume" : "pause"}  [c] clear`}
         </Text>
       </Box>
     </Box>

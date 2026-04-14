@@ -3,9 +3,10 @@ import type { AgentEvent, AgentName } from "../schema.js";
 
 interface Props {
   events: AgentEvent[];
+  selectedIdx?: number | null;
 }
 
-export function Timeline({ events }: Props) {
+export function Timeline({ events, selectedIdx }: Props) {
   const header = (
     <Box>
       <Text bold dimColor>
@@ -32,24 +33,33 @@ export function Timeline({ events }: Props) {
     );
   }
 
-  const visible = events.slice(0, 40);
+  // Keep the selected row in view if the user has navigated deep into history
+  const windowStart =
+    selectedIdx != null && selectedIdx > 30
+      ? Math.max(0, selectedIdx - 15)
+      : 0;
+  const visible = events.slice(windowStart, windowStart + 40);
 
   return (
     <Box flexDirection="column">
       {header}
-      {visible.map((e) => (
-        <EventRow key={e.id} event={e} />
+      {visible.map((e, i) => (
+        <EventRow
+          key={e.id}
+          event={e}
+          selected={windowStart + i === selectedIdx}
+        />
       ))}
     </Box>
   );
 }
 
-function EventRow({ event }: { event: AgentEvent }) {
+function EventRow({ event, selected }: { event: AgentEvent; selected: boolean }) {
   const time = event.ts.slice(11, 19);
   const line = event.summary ?? event.path ?? event.cmd ?? event.tool ?? event.type;
   return (
     <Box>
-      <Text wrap="truncate">
+      <Text wrap="truncate" inverse={selected}>
         <Text dimColor>{time} </Text>
         <Text color={agentColor(event.agent)}>{pad(event.agent, 10)} </Text>
         <Text color={riskColor(event.riskScore)}>{pad(event.type, 13)} </Text>
