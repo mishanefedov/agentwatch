@@ -4,12 +4,14 @@ import type { AgentEvent, AgentName } from "../schema.js";
 import { Timeline } from "./Timeline.js";
 import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
+import { PermissionView } from "./PermissionView.js";
 import { detectAgents } from "../adapters/detect.js";
 import { startClaudeAdapter } from "../adapters/claude-code.js";
 import { startOpenClawAdapter } from "../adapters/openclaw.js";
 import { startCursorAdapter } from "../adapters/cursor.js";
 import { startFsAdapter } from "../adapters/fs-watcher.js";
 import { detectWorkspaceRoot } from "../util/workspace.js";
+import { readClaudePermissions } from "../util/claude-permissions.js";
 
 const MAX_EVENTS = 500;
 
@@ -17,12 +19,14 @@ type State = {
   events: AgentEvent[];
   filterAgent: AgentName | null;
   showAgents: boolean;
+  showPermissions: boolean;
   paused: boolean;
 };
 
 type Action =
   | { type: "event"; event: AgentEvent }
   | { type: "toggle-agents" }
+  | { type: "toggle-permissions" }
   | { type: "cycle-filter"; agents: AgentName[] }
   | { type: "toggle-pause" }
   | { type: "clear" };
@@ -36,6 +40,8 @@ function reducer(state: State, action: Action): State {
     }
     case "toggle-agents":
       return { ...state, showAgents: !state.showAgents };
+    case "toggle-permissions":
+      return { ...state, showPermissions: !state.showPermissions };
     case "cycle-filter": {
       const idx = state.filterAgent
         ? action.agents.indexOf(state.filterAgent)
@@ -55,10 +61,12 @@ export function App() {
   const { exit } = useApp();
   const [workspace] = useState(detectWorkspaceRoot());
   const [agents] = useState(detectAgents());
+  const [permissions] = useState(() => readClaudePermissions(workspace));
   const [state, dispatch] = useReducer(reducer, {
     events: [],
     filterAgent: null,
     showAgents: true,
+    showPermissions: false,
     paused: false,
   });
 
@@ -87,7 +95,8 @@ export function App() {
         : (["claude-code", "unknown"] as AgentName[]);
       dispatch({ type: "cycle-filter", agents: pool });
     }
-    if (input === "p") dispatch({ type: "toggle-pause" });
+    if (input === " ") dispatch({ type: "toggle-pause" });
+    if (input === "p") dispatch({ type: "toggle-permissions" });
     if (input === "c") dispatch({ type: "clear" });
   });
 
@@ -103,19 +112,23 @@ export function App() {
         filter={state.filterAgent}
         paused={state.paused}
       />
-      <Box flexDirection="row">
-        <Box flexGrow={1} flexDirection="column">
-          <Timeline events={filtered} />
-        </Box>
-        {state.showAgents && (
-          <Box width={32} marginLeft={1}>
-            <AgentPanel agents={agents} events={state.events} />
+      {state.showPermissions ? (
+        <PermissionView permissions={permissions} />
+      ) : (
+        <Box flexDirection="row">
+          <Box flexGrow={1} flexDirection="column">
+            <Timeline events={filtered} />
           </Box>
-        )}
-      </Box>
+          {state.showAgents && (
+            <Box width={32} marginLeft={1}>
+              <AgentPanel agents={agents} events={state.events} />
+            </Box>
+          )}
+        </Box>
+      )}
       <Box marginTop={1}>
         <Text dimColor>
-          [q] quit  [a] agents  [f] filter  [p] {state.paused ? "resume" : "pause"}  [c] clear
+          [q] quit  [a] agents  [f] filter  [p] permissions  [space] {state.paused ? "resume" : "pause"}  [c] clear
         </Text>
       </Box>
     </Box>
