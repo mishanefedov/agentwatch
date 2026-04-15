@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import type { AgentEvent } from "../schema.js";
 import { formatUSD } from "../util/cost.js";
+import { highlight, inferLang } from "../util/highlight.js";
 
 interface Props {
   event: AgentEvent;
@@ -84,7 +85,9 @@ function buildRows(event: AgentEvent, width: number): Row[] {
       kind: "heading",
       text: d.toolError ? "tool result (error)" : "tool result",
     });
-    for (const l of wrap(d.toolResult, max)) rows.push({ kind: "text", text: l });
+    const lang = inferLang(event, d.toolResult);
+    const rendered = lang ? highlight(d.toolResult, lang) : d.toolResult;
+    for (const l of rendered.split("\n")) rows.push({ kind: "text", text: l });
   }
 
   if (d?.fullText) {
@@ -101,9 +104,8 @@ function buildRows(event: AgentEvent, width: number): Row[] {
   if (d?.toolInput) {
     rows.push({ kind: "heading", text: "tool input" });
     const pretty = JSON.stringify(d.toolInput, null, 2);
-    for (const l of pretty.split("\n"))
-      for (const w of wrap(l, max))
-        rows.push({ kind: "text", text: w });
+    const rendered = highlight(pretty, "json");
+    for (const l of rendered.split("\n")) rows.push({ kind: "text", text: l });
   }
 
   if (d?.toolUseId) {
