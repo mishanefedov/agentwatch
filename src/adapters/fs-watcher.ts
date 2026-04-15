@@ -38,11 +38,21 @@ const DEFAULT_IGNORES = [
 
 export function startFsAdapter(root: string, sink: Emit): () => void {
   const emit = typeof sink === "function" ? sink : sink.emit;
+  // Unless explicitly opted in, skip watching the workspace tree at all.
+  // The fs-watcher was a nice-to-have that doesn't pull its weight on
+  // large monorepos — a 10k-dir tree can take seconds to establish
+  // watches and exhausts inotify limits on Linux. Opt in via
+  // AGENTWATCH_WATCH_WORKSPACE=1 when you actually want generic file
+  // change events alongside agent activity.
+  if (process.env.AGENTWATCH_WATCH_WORKSPACE !== "1") {
+    return () => {};
+  }
   const watcher = chokidar.watch(root, {
     persistent: true,
     ignoreInitial: true,
     ignored: (p) => DEFAULT_IGNORES.some((r) => r.test(p)),
-    depth: 3,
+    depth: 2,
+    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
   });
 
   watcher.on("error", (err) => {
