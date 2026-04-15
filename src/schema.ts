@@ -19,6 +19,7 @@ export type EventType =
   | "shell_exec"
   | "prompt"
   | "response"
+  | "compaction"
   | "session_start"
   | "session_end";
 
