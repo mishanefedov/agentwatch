@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import type { AgentEvent, AgentName, EventDetails, EventSink } from "../schema.js";
 import { Timeline } from "./Timeline.js";
@@ -138,6 +138,7 @@ type State = {
 
 type Action =
   | { type: "event"; event: AgentEvent }
+  | { type: "events-batch"; events: AgentEvent[] }
   | { type: "enrich"; eventId: string; patch: Partial<EventDetails> }
   | { type: "toggle-agents" }
   | { type: "toggle-permissions" }
@@ -199,6 +200,24 @@ function reducer(state: State, action: Action): State {
       let sel = state.selectedIdx;
       if (sel !== null && idx <= sel) sel = sel + 1;
       return { ...state, events: next, selectedIdx: sel };
+    }
+    case "events-batch": {
+      if (state.paused || action.events.length === 0) return state;
+      // Merge-sort batch into the existing sorted buffer. O(n+m) rather
+      // than O(m log m) dispatches + O(n²) inserts that the per-event
+      // path would do during backfill.
+      const merged: AgentEvent[] = [];
+      const a = state.events; // newest-first
+      const b = [...action.events].sort((x, y) => (x.ts < y.ts ? 1 : -1));
+      let i = 0;
+      let j = 0;
+      while (i < a.length && j < b.length && merged.length < MAX_EVENTS) {
+        if (a[i]!.ts >= b[j]!.ts) merged.push(a[i++]!);
+        else merged.push(b[j++]!);
+      }
+      while (i < a.length && merged.length < MAX_EVENTS) merged.push(a[i++]!);
+      while (j < b.length && merged.length < MAX_EVENTS) merged.push(b[j++]!);
+      return { ...state, events: merged };
     }
     case "enrich": {
       const next = state.events.slice();
@@ -529,9 +548,32 @@ export function App() {
     const stopTriggersWatch = watchTriggers();
     if (otelEnabled()) void initOtel();
     const launchedAt = Date.now();
+    // Coalesce incoming events into a single dispatch per ~60fps frame.
+    // During backfill the adapters dump hundreds of events at once;
+    // without coalescing each event triggers a reducer + re-render +
+    // anomaly/budget pass, freezing the TUI for several seconds.
+    // With coalescing we fold them all into one O(n+m) merge.
+    let pending: AgentEvent[] = [];
+    let flushScheduled = false;
+    const FLUSH_MS = 16;
+    const flush = (): void => {
+      flushScheduled = false;
+      if (pending.length === 0) return;
+      const batch = pending;
+      pending = [];
+      if (batch.length === 1) {
+        dispatch({ type: "event", event: batch[0]! });
+      } else {
+        dispatch({ type: "events-batch", events: batch });
+      }
+    };
     const sink: EventSink = {
       emit: (e: AgentEvent) => {
-        dispatch({ type: "event", event: e });
+        pending.push(e);
+        if (!flushScheduled) {
+          flushScheduled = true;
+          setTimeout(flush, FLUSH_MS);
+        }
         emitEventSpan(e);
         const eventMs = new Date(e.ts).getTime();
         if (eventMs < launchedAt) return;
@@ -546,6 +588,8 @@ export function App() {
     const cursorAdapter = adapters.find((a) => a.name === "cursor");
     if (cursorAdapter?.status) setCursorStatus(cursorAdapter.status);
     return () => {
+      // Final flush so events arriving in the last 16 ms aren't dropped.
+      flush();
       stopAllAdapters(adapters);
       stopTriggersWatch();
     };
@@ -574,45 +618,67 @@ export function App() {
     ? sessionScoped.filter((e) => matchesQuery(e, state.searchQuery))
     : sessionScoped;
 
-  const budgetStatus = computeBudgetStatus(state.events);
+  // All expensive derived passes are memoized on the event-buffer
+  // identity so they only re-run when the buffer actually changes, not
+  // on every keypress. This is the single biggest perf win for the TUI
+  // at scale.
+  const eventsRef = state.events;
+
+  const budgetStatus = useMemo(
+    () => computeBudgetStatus(eventsRef),
+    [eventsRef],
+  );
 
   // Anomaly pass — score only the most recent 40 events against their
   // per-agent history. Anything older is effectively static and
   // re-scoring it is wasted work.
-  const anomalies = new Map<string, AnomalyFlag[]>();
-  {
-    const sliceEnd = Math.min(40, state.events.length);
-    // Events are newest-first; score the newest batch.
+  const anomalies = useMemo(() => {
+    const out = new Map<string, AnomalyFlag[]>();
+    const sliceEnd = Math.min(40, eventsRef.length);
+    // Precompute per-agent histories once instead of slice+filter per event.
+    const historyByAgent = new Map<string, AgentEvent[]>();
+    for (const e of eventsRef) {
+      let arr = historyByAgent.get(e.agent);
+      if (!arr) {
+        arr = [];
+        historyByAgent.set(e.agent, arr);
+      }
+      arr.push(e);
+    }
     for (let i = 0; i < sliceEnd; i++) {
-      const ev = state.events[i]!;
-      const history = state.events
-        .slice(i + 1)
-        .filter((h) => h.agent === ev.agent);
+      const ev = eventsRef[i]!;
+      const agentHistory = historyByAgent.get(ev.agent) ?? [];
+      // `agentHistory` is newest-first same as eventsRef; drop entries
+      // at-or-before the current event.
+      const pos = agentHistory.indexOf(ev);
+      const history =
+        pos >= 0 ? agentHistory.slice(pos + 1) : agentHistory;
       if (history.length === 0) continue;
       const flags = scoreEvent(ev, history);
-      if (flags.length > 0) anomalies.set(ev.id, flags);
+      if (flags.length > 0) out.set(ev.id, flags);
     }
-  }
-  const stuckLoop = detectStuckLoop(state.events.slice(0, 20).reverse());
-  if (stuckLoop) {
-    const first = state.events[0];
-    if (first) {
-      const prev = anomalies.get(first.id) ?? [];
-      const label =
-        stuckLoop.period === 1
-          ? `same tool fired ${stuckLoop.count}× in a row`
-          : `period-${stuckLoop.period} loop (${stuckLoop.count} cycles): ${stuckLoop.pattern}`;
-      anomalies.set(first.id, [
-        ...prev,
-        {
-          kind: "stuck-loop",
-          message: `stuck loop: ${label}`,
-          magnitude: stuckLoop.count,
-          sessionId: first.sessionId,
-        },
-      ]);
+    const stuckLoop = detectStuckLoop(eventsRef.slice(0, 20).reverse());
+    if (stuckLoop) {
+      const first = eventsRef[0];
+      if (first) {
+        const prev = out.get(first.id) ?? [];
+        const label =
+          stuckLoop.period === 1
+            ? `same tool fired ${stuckLoop.count}× in a row`
+            : `period-${stuckLoop.period} loop (${stuckLoop.count} cycles): ${stuckLoop.pattern}`;
+        out.set(first.id, [
+          ...prev,
+          {
+            kind: "stuck-loop",
+            message: `stuck loop: ${label}`,
+            magnitude: stuckLoop.count,
+            sessionId: first.sessionId,
+          },
+        ]);
+      }
     }
-  }
+    return out;
+  }, [eventsRef]);
 
   // Fire OS notifications the first time a budget is breached this run.
   const budgetBreachKey = [
@@ -636,7 +702,10 @@ export function App() {
   }, [budgetBreachKey]);
 
   // Aggregate per session + fire OS notifications for new anomalies.
-  const sessionSummaries = summarizeBySession(anomalies);
+  const sessionSummaries = useMemo(
+    () => summarizeBySession(anomalies),
+    [anomalies],
+  );
   const anomalyKey = sessionSummaries
     .map((s) => `${s.sessionId}:${s.headline}`)
     .join("|");
@@ -659,19 +728,29 @@ export function App() {
     }
   }, [anomalyKey]);
 
-  const projects = buildProjectIndex(state.events);
-  const sessionsForOpen = state.sessionsForProject
-    ? buildSessionRows(state.events, state.sessionsForProject)
-    : [];
+  const projects = useMemo(
+    () => buildProjectIndex(eventsRef),
+    [eventsRef],
+  );
+  const sessionsForOpen = useMemo(
+    () =>
+      state.sessionsForProject
+        ? buildSessionRows(eventsRef, state.sessionsForProject)
+        : [],
+    [eventsRef, state.sessionsForProject],
+  );
 
   // Build a parent→child count index for Agent tool_use events
-  const childCountByAgentId = new Map<string, number>();
-  for (const e of state.events) {
-    if (e.sessionId?.startsWith("agent-")) {
-      const aid = e.sessionId.slice("agent-".length);
-      childCountByAgentId.set(aid, (childCountByAgentId.get(aid) ?? 0) + 1);
+  const childCountByAgentId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of eventsRef) {
+      if (e.sessionId?.startsWith("agent-")) {
+        const aid = e.sessionId.slice("agent-".length);
+        m.set(aid, (m.get(aid) ?? 0) + 1);
+      }
     }
-  }
+    return m;
+  }, [eventsRef]);
 
   const cols = stdout.columns || 120;
   const rows = stdout.rows || 30;
