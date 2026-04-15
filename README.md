@@ -38,7 +38,6 @@ local. No cloud. No telemetry. No sign-in.
 - [How it compares](#how-it-compares)
 - [Limitations](#limitations)
 - [Non-goals](#non-goals)
-- [Roadmap](#roadmap)
 - [Architecture](#architecture)
 - [Development](#development)
 - [Security](#security)
@@ -494,7 +493,7 @@ rule-based), **budget alarms**, and **OTel with gen_ai.* conventions**.
 ## Limitations
 
 - **agentwatch is a viewer, not a daemon.** It captures events only while
-  the TUI is running. A background-capture daemon is a roadmap item.
+  the TUI is running. A background-capture daemon is planned.
 - **Backfill is bounded.** On launch we read the last ~4 MB of each
   active session file (roughly hundreds of events). For long gaps on
   very active sessions, earliest events may fall out of the backfill
@@ -527,32 +526,6 @@ Hard scope boundaries so agentwatch stays small and maintainable.
 - **Not orchestration.** Use Mission Control / Stoneforge for running agents in parallel.
 - **Not memory.** Use [claude-mem](https://github.com/thedotmack/claude-mem).
 - **Not governance / policy enforcement.** Use DashClaw / Castra.
-
----
-
-## Roadmap
-
-The full ticket-level roadmap lives in the
-[Linear project](https://linear.app/auraqu/project/agentwatch-748d6aa1c20a).
-
-### Shipped (v0.0.3)
-
-- **M5 — parity with claude-devtools** — token attribution, compaction visualizer, syntax highlighting, session export, stale detection, Codex adapter
-- **M6 — differentiation moats** — budget alarms, user triggers, MCP server, OTel exporter, cross-session search, OpenClaw/Gemini/Codex parity pass
-- **M7 (partial)** — anomaly detection (MAD + stuck-loop)
-
-### In flight
-
-- **Semantic session search** ([AUR-181](https://linear.app/auraqu/issue/AUR-181)) — local `transformers.js` + `sqlite-vec` + BM25 hybrid. ~3-4 days of work.
-- **Cursor SQLite adapter** ([AUR-187](https://linear.app/auraqu/issue/AUR-187)) — thin best-effort read of workspaceStorage/*.vscdb.
-
-### Canceled (with documented reasoning)
-
-- **Diff-attribution** (AUR-182) — blocked without edit-IDs from agents.
-- **Cross-agent session correlation** (AUR-183) — needs labeled confirmation data first.
-- **Replay mode** (AUR-184) — requires cloud LLM or local model of comparable quality; violates no-cloud principle.
-
-Feature requests: [GitHub issues](https://github.com/mishanefedov/agentwatch/issues).
 
 ---
 
