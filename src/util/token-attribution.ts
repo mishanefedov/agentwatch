@@ -1,7 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
 import { encode as tokenize } from "gpt-tokenizer";
-import type { AgentEvent } from "../schema.js";
+import type { AgentEvent, AgentName } from "../schema.js";
+import { memoryFilesFor } from "./memory-file.js";
 
 export interface TokenBreakdown {
   input: number;
@@ -14,8 +13,10 @@ export interface TokenBreakdown {
   toolIO: number;
   /** User-text tokens (prompt fullText, tokenizer-measured). */
   user: number;
-  /** Tokens for the workspace's CLAUDE.md (tokenizer-measured). */
-  claudeMd: number;
+  /** Tokens for the agent's project memory file(s) (tokenizer-measured).
+   *  Source varies per agent: CLAUDE.md, AGENTS.md, GEMINI.md,
+   *  .cursorrules, .windsurfrules, CONVENTIONS.md, OPENCLAW.md. */
+  memoryFile: number;
   /** Total cost in USD summed across assistant turns. */
   cost: number;
   /** Number of assistant turns contributing to these counts. */
@@ -31,7 +32,7 @@ export interface TurnBreakdown {
   user: number;
   thinking: number;
   toolIO: number;
-  claudeMd: number;
+  memoryFile: number;
   input: number;
   cacheRead: number;
   cacheCreate: number;
@@ -39,30 +40,26 @@ export interface TurnBreakdown {
   cost: number;
 }
 
-let claudeMdCache: { path: string | null; tokens: number } | null = null;
+const memoryCache = new Map<string, number>();
 
-/** Read the workspace CLAUDE.md (if present) and tokenize once per
- *  process. Used as a per-turn attribution for turns that include
- *  the agent's system memory. */
-export function claudeMdTokens(cwd: string = process.cwd()): number {
-  if (claudeMdCache) return claudeMdCache.tokens;
-  const p = path.join(cwd, "CLAUDE.md");
-  if (!fs.existsSync(p)) {
-    claudeMdCache = { path: null, tokens: 0 };
-    return 0;
-  }
-  try {
-    const text = fs.readFileSync(p, "utf8");
-    claudeMdCache = { path: p, tokens: countTokens(text) };
-    return claudeMdCache.tokens;
-  } catch {
-    claudeMdCache = { path: null, tokens: 0 };
-    return 0;
-  }
+/** Read the agent's memory file(s) (if present) and tokenize once per
+ *  (agent, cwd) pair. Used as a per-turn attribution for turns that
+ *  include the agent's system memory. */
+export function memoryFileTokens(
+  agent: AgentName,
+  cwd: string = process.cwd(),
+): number {
+  const key = `${agent}|${cwd}`;
+  const hit = memoryCache.get(key);
+  if (hit !== undefined) return hit;
+  const info = memoryFilesFor(agent, cwd);
+  const tokens = info.text ? countTokens(info.text) : 0;
+  memoryCache.set(key, tokens);
+  return tokens;
 }
 
-export function _resetClaudeMdCache(): void {
-  claudeMdCache = null;
+export function _resetMemoryFileCache(): void {
+  memoryCache.clear();
 }
 
 /** Real tokenizer. Uses gpt-tokenizer (cl100k_base — OpenAI's vocab);
@@ -97,7 +94,8 @@ export function attributeTurns(
   const inSession = events
     .filter((e) => e.sessionId === sessionId)
     .sort((a, b) => (a.ts < b.ts ? -1 : 1));
-  const claudeMd = claudeMdTokens(cwd);
+  const agentName = inSession[0]?.agent ?? "unknown";
+  const memoryFile = memoryFileTokens(agentName, cwd);
   const breakdowns: TurnBreakdown[] = [];
   let pendingUserTokens = 0;
   let pendingToolIO = 0;
@@ -129,7 +127,7 @@ export function attributeTurns(
       user: pendingUserTokens,
       thinking,
       toolIO: pendingToolIO,
-      claudeMd,
+      memoryFile,
       input: d.usage.input,
       cacheRead: d.usage.cacheRead,
       cacheCreate: d.usage.cacheCreate,
@@ -158,7 +156,7 @@ export function attributeTokens(
     thinking: 0,
     toolIO: 0,
     user: 0,
-    claudeMd: 0,
+    memoryFile: 0,
     cost: 0,
     turns: turns.length,
   };
@@ -172,8 +170,8 @@ export function attributeTokens(
     out.user += t.user;
     out.cost += t.cost;
   }
-  // CLAUDE.md is a constant overhead — include it once, not per turn.
-  out.claudeMd = turns.length > 0 ? turns[0]!.claudeMd : 0;
+  // Memory file is a constant overhead — include it once, not per turn.
+  out.memoryFile = turns.length > 0 ? turns[0]!.memoryFile : 0;
   return out;
 }
 

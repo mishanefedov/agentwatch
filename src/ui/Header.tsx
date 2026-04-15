@@ -54,7 +54,7 @@ export function Header({
           )}
         </Text>
       </Box>
-      {breached && budget && (
+      {breached && budget && budget.sessionCost > 0 && (
         <Box>
           <Text color="red" bold>
             ⚠ BUDGET BREACH
