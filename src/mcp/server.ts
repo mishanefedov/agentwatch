@@ -36,7 +36,7 @@ interface SessionRef {
 export async function runMcpServer(): Promise<void> {
   const server = new McpServer({
     name: "agentwatch",
-    version: "0.0.2",
+    version: "0.0.3",
   });
 
   server.registerTool(

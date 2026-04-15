@@ -12,6 +12,7 @@ const GROUPS: Group[] = [
       ["↑ ↓ / j k", "move selection in timeline"],
       ["enter", "open event detail pane"],
       ["esc", "close current view / clear selection"],
+      ["0", "home — reset every view, filter, scope to defaults"],
       ["P", "projects grid — every workspace on this machine"],
       ["enter on project", "sessions list for that project (by date)"],
       ["enter on session", "scoped timeline for that session"],
@@ -19,29 +20,42 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: "Search (unified, opens with /)",
+    rows: [
+      ["/", "open the unified search overlay"],
+      ["tab  /  1 2 3", "switch mode — live · cross-session · semantic"],
+      ["enter (typing)", "run search in the active mode"],
+      ["↑↓ then enter", "open the selected hit"],
+    ],
+  },
+  {
     title: "Filter & scope",
     rows: [
-      ["/", "full-text search (summary, path, cmd, tool, text)"],
-      ["f", "cycle agent filter (claude / openclaw / cursor / …)"],
+      ["f", "cycle agent filter (claude / codex / gemini / cursor / openclaw)"],
       ["a", "toggle agent side panel"],
       ["x", "drill into selected Agent event's subagent run"],
       ["X", "unscope subagent"],
       ["A", "clear project filter"],
+      ["Z", "clear every active filter / scope at once"],
     ],
   },
   {
     title: "Actions",
     rows: [
       ["y", "yank selected event content to clipboard"],
+      ["e", "export current session to ./agentwatch-export/*.{md,json}"],
       ["space", "pause / resume live event stream"],
       ["c", "clear event buffer"],
+      ["D", "dismiss the active anomaly banner"],
     ],
   },
   {
     title: "Info views",
     rows: [
-      ["p", "permissions view (Claude + Cursor + OpenClaw)"],
-      ["↑↓ / j k inside permissions", "scroll"],
+      ["p", "permissions (Claude + Codex + Gemini + Cursor + OpenClaw)"],
+      ["t", "token attribution (only inside a scoped session)"],
+      ["C", "context compaction visualizer (only inside a scoped session)"],
+      ["↑↓ / j k inside any view", "scroll"],
     ],
   },
   {
