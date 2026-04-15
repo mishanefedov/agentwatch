@@ -15,6 +15,7 @@ import { restoreTerminal } from "../util/terminal.js";
 import { attributeTokens } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
+import { CompactionView, compactionPointCount } from "./CompactionView.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { watchTriggers } from "../util/triggers.js";
 import {
@@ -101,6 +102,9 @@ type State = {
   showHelp: boolean;
   /** Token-attribution overlay for the currently scoped session. */
   showTokens: boolean;
+  /** Compaction visualizer overlay for the currently scoped session. */
+  showCompaction: boolean;
+  compactionSelectedIdx: number;
   /** Cross-session search view state. */
   crossSearchOpen: boolean;
   crossSearchQuery: string;
@@ -143,6 +147,8 @@ type Action =
   | { type: "flash-clear" }
   | { type: "toggle-help" }
   | { type: "toggle-tokens" }
+  | { type: "toggle-compaction" }
+  | { type: "compaction-move"; delta: number; max: number }
   | { type: "cross-open" }
   | { type: "cross-close" }
   | { type: "cross-type"; char: string }
@@ -314,6 +320,20 @@ function reducer(state: State, action: Action): State {
       return { ...state, showHelp: !state.showHelp };
     case "toggle-tokens":
       return { ...state, showTokens: !state.showTokens };
+    case "toggle-compaction":
+      return {
+        ...state,
+        showCompaction: !state.showCompaction,
+        compactionSelectedIdx: 0,
+      };
+    case "compaction-move": {
+      if (action.max <= 0) return state;
+      const next = Math.max(
+        0,
+        Math.min(action.max - 1, state.compactionSelectedIdx + action.delta),
+      );
+      return { ...state, compactionSelectedIdx: next };
+    }
     case "cross-open":
       return {
         ...state,
@@ -455,6 +475,8 @@ export function App() {
     crossSearchIdx: 0,
     anomalyDismissKey: null,
     anomalyNotified: new Set<string>(),
+    showCompaction: false,
+    compactionSelectedIdx: 0,
   });
 
   useEffect(() => {
@@ -849,6 +871,18 @@ export function App() {
     if (input === "t" && state.sessionFilter) {
       dispatch({ type: "toggle-tokens" });
     }
+    if (input === "C" && state.sessionFilter) {
+      dispatch({ type: "toggle-compaction" });
+    }
+    if (state.showCompaction && state.sessionFilter) {
+      const max = compactionPointCount(state.events, state.sessionFilter);
+      if (key.leftArrow || input === "h") {
+        dispatch({ type: "compaction-move", delta: -1, max });
+      }
+      if (key.rightArrow || input === "l") {
+        dispatch({ type: "compaction-move", delta: 1, max });
+      }
+    }
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") {
       dispatch({ type: "set-project-filter", project: null });
@@ -928,6 +962,13 @@ export function App() {
           selectedIdx={state.crossSearchIdx}
           viewportRows={Math.max(3, rows - 8)}
         />
+      ) : state.showCompaction && state.sessionFilter ? (
+        <CompactionView
+          events={state.events}
+          sessionId={state.sessionFilter}
+          selectedIdx={state.compactionSelectedIdx}
+          viewportCols={cols}
+        />
       ) : state.showTokens && state.sessionFilter ? (
         <TokensView
           breakdown={attributeTokens(state.events, state.sessionFilter)}
@@ -1004,7 +1045,7 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[?] help  [q] quit  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens" : ""}  [Z] clear filters`}
+                : `[?] help  [q] quit  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens  [C] compact" : ""}  [Z] clear filters`}
         </Text>
       </Box>
     </Box>
