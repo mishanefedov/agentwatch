@@ -15,6 +15,8 @@ interface Props {
   /** When semantic search is busy (embedding + indexing), show a
    *  progress line instead of (or alongside) the results. */
   indexingStatus?: string | null;
+  /** When set, the first-run confirmation modal is shown. */
+  confirming?: { query: string } | null;
 }
 
 export function CrossSearchView({
@@ -24,10 +26,49 @@ export function CrossSearchView({
   viewportRows,
   mode,
   indexingStatus,
+  confirming,
 }: Props) {
   const height = Math.max(3, viewportRows);
   const first = Math.max(0, Math.min(hits.length - height, selectedIdx - 2));
   const visible = hits.slice(first, first + height);
+  if (confirming) {
+    return (
+      <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1}>
+        <Text bold color="yellow">First-run setup — semantic search</Text>
+        <Text> </Text>
+        <Text>
+          Semantic search needs to download a sentence-embedding model
+          (<Text bold>bge-small-en-v1.5</Text>, ~80 MB) and build a local
+          index of every session on disk.
+        </Text>
+        <Text> </Text>
+        <Text dimColor>
+          Downloaded to:  ~/.agentwatch/models/
+        </Text>
+        <Text dimColor>
+          Index at:       ~/.agentwatch/index.sqlite
+        </Text>
+        <Text dimColor>
+          Estimated time: ~20s download + 1–3 min indexing (depends on history size)
+        </Text>
+        <Text dimColor>
+          Disk use:       ~100 MB (model) + ~50–150 MB (index)
+        </Text>
+        <Text dimColor>
+          Network:        one-time HTTPS fetch from huggingface.co; afterwards fully local.
+        </Text>
+        <Text> </Text>
+        <Text>
+          Query: <Text color="cyan">{confirming.query}</Text>
+        </Text>
+        <Text> </Text>
+        <Text bold>
+          Proceed?  <Text color="green">[y]</Text> yes{"  "}
+          <Text color="red">[n]</Text> no  (also: esc cancels)
+        </Text>
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column" borderStyle="double" paddingX={1}>
       <Text>
