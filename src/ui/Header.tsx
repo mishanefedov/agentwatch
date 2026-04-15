@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import type { AgentName } from "../schema.js";
 import type { BudgetStatus } from "../util/budgets.js";
+import type { AnomalyFlag } from "../util/anomaly.js";
 import { formatUSD } from "../util/cost.js";
 
 interface Props {
@@ -9,12 +10,21 @@ interface Props {
   filter: AgentName | null;
   paused: boolean;
   budget?: BudgetStatus;
+  anomalies?: Map<string, AnomalyFlag[]>;
 }
 
 export type { Props as HeaderProps };
 
-export function Header({ workspace, eventCount, filter, paused, budget }: Props) {
+export function Header({
+  workspace,
+  eventCount,
+  filter,
+  paused,
+  budget,
+  anomalies,
+}: Props) {
   const breached = budget?.breachedSession || budget?.dayBreach;
+  const anomalyMessages = summarizeAnomalies(anomalies);
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box flexDirection="row" justifyContent="space-between">
@@ -66,6 +76,29 @@ export function Header({ workspace, eventCount, filter, paused, budget }: Props)
           )}
         </Box>
       )}
+      {anomalyMessages.map((msg) => (
+        <Text key={msg} color="red">
+          ⚠ anomaly: <Text bold>{msg}</Text>
+        </Text>
+      ))}
     </Box>
   );
+}
+
+function summarizeAnomalies(
+  map?: Map<string, AnomalyFlag[]>,
+): string[] {
+  if (!map || map.size === 0) return [];
+  const seen = new Set<string>();
+  const msgs: string[] = [];
+  for (const flags of map.values()) {
+    for (const f of flags) {
+      const key = `${f.kind}:${f.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      msgs.push(f.message);
+      if (msgs.length >= 3) return msgs;
+    }
+  }
+  return msgs;
 }
