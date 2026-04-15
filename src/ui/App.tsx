@@ -14,6 +14,7 @@ import { exportSession } from "../util/export.js";
 import { restoreTerminal } from "../util/terminal.js";
 import { attributeTokens } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
+import { computeBudgetStatus } from "../util/budgets.js";
 import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
 import { Breadcrumb } from "./Breadcrumb.js";
@@ -671,6 +672,7 @@ export function App() {
         eventCount={state.events.length}
         filter={state.filterAgent}
         paused={state.paused}
+        budget={computeBudgetStatus(state.events)}
       />
       <Breadcrumb
         projectFilter={state.projectFilter}
