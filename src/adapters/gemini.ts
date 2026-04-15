@@ -5,6 +5,7 @@ import { basename, join, sep } from "node:path";
 import type { AgentEvent, EventSink, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
+import { costOf, type Usage } from "../util/cost.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
 
@@ -119,6 +120,15 @@ function translate(
     return null; // skip info messages
   }
 
+  const usage = extractGeminiUsage(msg);
+  const model =
+    typeof msg.model === "string"
+      ? msg.model
+      : typeof msg.modelVersion === "string"
+        ? msg.modelVersion
+        : "gemini-2.5-pro";
+  const cost = usage ? costOf(model, usage) : undefined;
+
   return {
     id: nextId(),
     ts,
@@ -128,7 +138,45 @@ function translate(
     summary: prefix + truncate(text),
     riskScore: type === "error" ? 6 : riskOf(eventType),
     tool: kind === "subagent" ? "gemini:subagent" : "gemini",
-    details: { fullText: text },
+    details: {
+      fullText: text,
+      ...(usage ? { usage, cost, model } : {}),
+      ...(typeof (msg.thoughts as unknown) === "string" && msg.thoughts
+        ? { thinking: msg.thoughts as string }
+        : {}),
+    },
+  };
+}
+
+/** Gemini CLI emits tokens as:
+ *   { input, output, cached, thoughts, tool, total }
+ *
+ * - `input` is the *total* input (including cached prefix)
+ * - `cached` is the portion served from cache
+ * - `output` is the visible response tokens
+ * - `thoughts` is private chain-of-thought tokens, billed separately
+ *
+ * Our schema wants `input` = fresh uncached input, so we subtract.
+ * We fold `thoughts` into `output` because both are billed at output
+ * rates on current Gemini pricing tiers. */
+export function extractGeminiUsage(
+  msg: Record<string, unknown>,
+): Usage | null {
+  const t = msg.tokens;
+  if (!t || typeof t !== "object") return null;
+  const n = (v: unknown): number => (typeof v === "number" ? v : 0);
+  const o = t as Record<string, unknown>;
+  const input = n(o.input);
+  const cached = n(o.cached);
+  const output = n(o.output) + n(o.thoughts) + n(o.tool);
+  const cacheRead = Math.max(0, cached);
+  const fresh = Math.max(0, input - cached);
+  if (fresh + cacheRead + output === 0) return null;
+  return {
+    input: fresh,
+    cacheCreate: 0,
+    cacheRead,
+    output,
   };
 }
 
