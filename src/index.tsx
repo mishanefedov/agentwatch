@@ -1,19 +1,16 @@
 import { render } from "ink";
 import { App } from "./ui/App.js";
+import { restoreTerminal } from "./util/terminal.js";
 
 const arg = process.argv[2];
 
-/** Enter/leave the terminal's alternate screen buffer so the TUI takes
- *  over the viewport and the shell's scrollback is preserved on exit. */
+/** Enter the terminal's alternate screen buffer so the TUI takes over the
+ *  viewport and the shell's scrollback is preserved on exit. Leaving the
+ *  alt screen (and restoring raw mode) happens in restoreTerminal(). */
 const ENTER_ALT_SCREEN = "\x1b[?1049h\x1b[2J\x1b[H";
-const LEAVE_ALT_SCREEN = "\x1b[?1049l";
 
 function enterAltScreen(): void {
   if (process.stdout.isTTY) process.stdout.write(ENTER_ALT_SCREEN);
-}
-
-function leaveAltScreen(): void {
-  if (process.stdout.isTTY) process.stdout.write(LEAVE_ALT_SCREEN);
 }
 
 if (arg === "--help" || arg === "-h") {
@@ -72,10 +69,10 @@ if (arg === "doctor") {
 enterAltScreen();
 for (const sig of ["exit", "SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(sig, () => {
-    leaveAltScreen();
+    restoreTerminal();
     if (sig !== "exit") process.exit(0);
   });
 }
 
 const { waitUntilExit } = render(<App />);
-waitUntilExit().finally(() => leaveAltScreen());
+waitUntilExit().finally(() => restoreTerminal());
