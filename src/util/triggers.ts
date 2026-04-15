@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import chokidar from "chokidar";
 import type { AgentEvent, EventType } from "../schema.js";
 
 /**
@@ -71,6 +72,32 @@ export function loadTriggers(): CompiledTrigger[] {
     cached = [];
   }
   return cached;
+}
+
+let watcher: ReturnType<typeof chokidar.watch> | null = null;
+
+/** Start watching the triggers file so edits take effect without a
+ *  restart. Idempotent. No-op until the user creates the file. */
+export function watchTriggers(): () => void {
+  if (watcher) return () => void watcher?.close();
+  try {
+    watcher = chokidar.watch(TRIGGERS_PATH, {
+      persistent: true,
+      ignoreInitial: true,
+    });
+    watcher.on("change", () => _resetTriggersCache());
+    watcher.on("add", () => _resetTriggersCache());
+    watcher.on("unlink", () => _resetTriggersCache());
+    watcher.on("error", () => {
+      /* swallow — triggers are a convenience, not load-bearing */
+    });
+  } catch {
+    /* chokidar failed to spin up; run without live-reload */
+  }
+  return () => {
+    void watcher?.close();
+    watcher = null;
+  };
 }
 
 /** Test helper — resets the cache so tests can load different configs. */

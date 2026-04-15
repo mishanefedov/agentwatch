@@ -4,7 +4,9 @@ import { z } from "zod";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { claudeProjectsDir } from "../util/workspace.js";
-import { codexSessionsDir } from "../adapters/codex.js";
+import { codexSessionsDir, translateCodexLine } from "../adapters/codex.js";
+import { translateClaudeLine } from "../adapters/claude-code.js";
+import type { AgentEvent } from "../schema.js";
 
 /**
  * agentwatch MCP server. Exposes the user's local agent history so
@@ -15,9 +17,11 @@ import { codexSessionsDir } from "../adapters/codex.js";
  * Transport: stdio. Run via `agentwatch mcp`.
  *
  * Tools:
- *   - list_recent_sessions  → [{agent, sessionId, project, lastActivity, events}]
- *   - get_session_events    → raw jsonl lines for a session
- *   - search_sessions       → grep across all session files
+ *   - list_recent_sessions   → [{agent, sessionId, project, lastActivity, events}]
+ *   - get_session_events     → raw jsonl lines for a session
+ *   - search_sessions        → grep across all session files
+ *   - get_tool_usage_stats   → per-tool invocation counts + durations + errors
+ *   - get_session_cost       → per-session cost, token breakdown, turn count
  */
 
 interface SessionRef {
@@ -130,8 +134,169 @@ export async function runMcpServer(): Promise<void> {
     },
   );
 
+  server.registerTool(
+    "get_tool_usage_stats",
+    {
+      title: "Tool usage statistics",
+      description:
+        "Aggregate tool invocation counts, total duration, and error counts. If sessionId is given, stats are scoped to that session; otherwise scoped to the N most recently active sessions across all agents (default 50).",
+      inputSchema: {
+        sessionId: z.string().optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+    },
+    async ({ sessionId, limit }) => {
+      const sessions = sessionId
+        ? listAllSessions().filter((s) => s.sessionId === sessionId)
+        : listAllSessions().slice(0, limit ?? 50);
+      if (sessions.length === 0) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: sessionId
+                ? `session ${sessionId} not found`
+                : "no sessions found",
+            },
+          ],
+        };
+      }
+      type Stat = {
+        tool: string;
+        count: number;
+        totalDurationMs: number;
+        errorCount: number;
+      };
+      const stats = new Map<string, Stat>();
+      let turns = 0;
+      let scannedSessions = 0;
+      for (const s of sessions) {
+        const events = parseSession(s);
+        scannedSessions += 1;
+        for (const e of events) {
+          if (e.type === "prompt" || e.type === "response") turns += 1;
+          const tool = e.tool;
+          if (!tool) continue;
+          let row = stats.get(tool);
+          if (!row) {
+            row = { tool, count: 0, totalDurationMs: 0, errorCount: 0 };
+            stats.set(tool, row);
+          }
+          row.count += 1;
+          if (e.details?.durationMs) row.totalDurationMs += e.details.durationMs;
+          if (e.details?.toolError) row.errorCount += 1;
+        }
+      }
+      const sorted = Array.from(stats.values()).sort((a, b) => b.count - a.count);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { scannedSessions, turns, tools: sorted },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_session_cost",
+    {
+      title: "Session cost + token breakdown",
+      description:
+        "Return total cost (USD), token counts broken down by input / cache read / cache create / output, and turn count for a given session.",
+      inputSchema: {
+        sessionId: z.string(),
+      },
+    },
+    async ({ sessionId }) => {
+      const match = listAllSessions().find((s) => s.sessionId === sessionId);
+      if (!match) {
+        return {
+          isError: true,
+          content: [
+            { type: "text", text: `session ${sessionId} not found` },
+          ],
+        };
+      }
+      const events = parseSession(match);
+      let totalCost = 0;
+      let input = 0;
+      let cacheRead = 0;
+      let cacheCreate = 0;
+      let output = 0;
+      let turns = 0;
+      const byModel = new Map<string, number>();
+      for (const e of events) {
+        const d = e.details;
+        if (!d) continue;
+        if (d.cost) {
+          totalCost += d.cost;
+          const model = d.model ?? "unknown";
+          byModel.set(model, (byModel.get(model) ?? 0) + d.cost);
+        }
+        if (d.usage) {
+          input += d.usage.input;
+          cacheRead += d.usage.cacheRead;
+          cacheCreate += d.usage.cacheCreate;
+          output += d.usage.output;
+          turns += 1;
+        }
+      }
+      const result = {
+        agent: match.agent,
+        sessionId,
+        project: match.project,
+        totalCostUsd: Number(totalCost.toFixed(6)),
+        turns,
+        tokens: { input, cacheRead, cacheCreate, output },
+        byModel: Object.fromEntries(
+          Array.from(byModel.entries()).map(([m, c]) => [
+            m,
+            Number(c.toFixed(6)),
+          ]),
+        ),
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+/** Read a session file, translate every line via the relevant adapter,
+ *  and return AgentEvents. Unreadable / malformed lines are silently
+ *  skipped. */
+function parseSession(s: SessionRef): AgentEvent[] {
+  let raw: string;
+  try {
+    raw = readFileSync(s.path, "utf8");
+  } catch {
+    return [];
+  }
+  const out: AgentEvent[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      const e =
+        s.agent === "claude-code"
+          ? translateClaudeLine(obj, s.sessionId, s.project)
+          : translateCodexLine(obj, s.sessionId, s.project);
+      if (e) out.push(e);
+    } catch {
+      /* malformed */
+    }
+  }
+  return out;
 }
 
 function listAllSessions(): SessionRef[] {
