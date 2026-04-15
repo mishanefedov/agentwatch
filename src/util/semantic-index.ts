@@ -11,10 +11,12 @@ import type { Database as DB } from "better-sqlite3";
  *                       ├─ Reciprocal Rank Fusion (k=60) → ranked turns
  *   Vector cosine  ─────┘
  *
- * Embeddings: Xenova/all-MiniLM-L6-v2 (384-dim, ~80 MB download on first
- * run, cached at ~/.agentwatch/models/). Loaded lazily via
- * transformers.js with ONNX-runtime WASM so no native build step is
- * required.
+ * Embeddings: BAAI/bge-small-en-v1.5 (384-dim, ~80 MB ONNX download on
+ * first run, cached at ~/.agentwatch/models/). Loaded lazily via
+ * @huggingface/transformers v3 (ONNX runtime WASM on Node, no native
+ * build step). bge-small-en-v1.5 scores 3-5 points higher than
+ * all-MiniLM-L6-v2 on MTEB short-text retrieval tasks at the same
+ * parameter size.
  *
  * Storage: ~/.agentwatch/index.sqlite (FTS5 virtual table + a plain
  * table of Float32Array embeddings stored as BLOB). For the ~10k turn
@@ -24,7 +26,7 @@ import type { Database as DB } from "better-sqlite3";
 
 const DB_DIR = path.join(os.homedir(), ".agentwatch");
 const DB_PATH = path.join(DB_DIR, "index.sqlite");
-export const MODEL_ID = "Xenova/all-MiniLM-L6-v2";
+export const MODEL_ID = "Xenova/bge-small-en-v1.5";
 export const EMBED_DIM = 384;
 
 let db: DB | null = null;
@@ -99,21 +101,24 @@ export async function loadEmbedder(): Promise<EmbedFn> {
   embedderPromise = (async () => {
     const cacheDir = path.join(DB_DIR, "models");
     fs.mkdirSync(cacheDir, { recursive: true });
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod: {
       pipeline: (
         task: string,
         model: string,
         opts?: unknown,
-      ) => Promise<(text: string, opts?: unknown) => Promise<{ data: Float32Array }>>;
+      ) => Promise<
+        (text: string, opts?: unknown) => Promise<{ data: Float32Array }>
+      >;
       env: Record<string, unknown>;
-    } = (await import("@xenova/transformers")) as unknown as {
+    } = (await import("@huggingface/transformers")) as unknown as {
       pipeline: typeof mod.pipeline;
       env: Record<string, unknown>;
     };
     mod.env.cacheDir = cacheDir;
     mod.env.allowLocalModels = false;
-    const extractor = await mod.pipeline("feature-extraction", MODEL_ID);
+    const extractor = await mod.pipeline("feature-extraction", MODEL_ID, {
+      dtype: "q8", // int8-quantized — 4× smaller, ~95% of float32 quality
+    });
     return async (text: string): Promise<Float32Array> => {
       const res = await extractor(text, { pooling: "mean", normalize: true });
       return res.data as Float32Array;
