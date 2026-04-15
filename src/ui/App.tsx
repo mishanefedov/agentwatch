@@ -16,6 +16,7 @@ import { attributeTokens } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
+import { watchTriggers } from "../util/triggers.js";
 import {
   detectStuckLoop,
   scoreEvent,
@@ -457,6 +458,7 @@ export function App() {
   });
 
   useEffect(() => {
+    const stopTriggersWatch = watchTriggers();
     if (otelEnabled()) void initOtel();
     const launchedAt = Date.now();
     const sink: EventSink = {
@@ -475,7 +477,10 @@ export function App() {
     const adapters = startAllAdapters(sink, workspace);
     const cursorAdapter = adapters.find((a) => a.name === "cursor");
     if (cursorAdapter?.status) setCursorStatus(cursorAdapter.status);
-    return () => stopAllAdapters(adapters);
+    return () => {
+      stopAllAdapters(adapters);
+      stopTriggersWatch();
+    };
   }, [workspace]);
 
   const agentFiltered = state.filterAgent
@@ -500,6 +505,8 @@ export function App() {
   const filtered = state.searchQuery
     ? sessionScoped.filter((e) => matchesQuery(e, state.searchQuery))
     : sessionScoped;
+
+  const budgetStatus = computeBudgetStatus(state.events);
 
   // Anomaly pass — score only the most recent 40 events against their
   // per-agent history. Anything older is effectively static and
@@ -538,6 +545,27 @@ export function App() {
       ]);
     }
   }
+
+  // Fire OS notifications the first time a budget is breached this run.
+  const budgetBreachKey = [
+    budgetStatus.breachedSession ?? "",
+    budgetStatus.dayBreach ? "day" : "",
+  ].join("|");
+  useEffect(() => {
+    if (!budgetStatus.breachedSession && !budgetStatus.dayBreach) return;
+    if (budgetStatus.breachedSession && budgetStatus.perSessionUsd != null) {
+      notify(
+        "⚠ agentwatch — session budget breached",
+        `session ${budgetStatus.breachedSession.slice(0, 8)} $${budgetStatus.sessionCost.toFixed(4)} > cap $${budgetStatus.perSessionUsd.toFixed(2)}`,
+      );
+    }
+    if (budgetStatus.dayBreach && budgetStatus.perDayUsd != null) {
+      notify(
+        "⚠ agentwatch — daily budget breached",
+        `today $${budgetStatus.dayCost.toFixed(4)} > cap $${budgetStatus.perDayUsd.toFixed(2)}`,
+      );
+    }
+  }, [budgetBreachKey]);
 
   // Aggregate per session + fire OS notifications for new anomalies.
   const sessionSummaries = summarizeBySession(anomalies);
@@ -866,7 +894,7 @@ export function App() {
         eventCount={state.events.length}
         filter={state.filterAgent}
         paused={state.paused}
-        budget={computeBudgetStatus(state.events)}
+        budget={budgetStatus}
         anomalies={bannerSuppressed ? undefined : anomalies}
         sessionAnomalies={bannerSuppressed ? [] : sessionSummaries}
       />
