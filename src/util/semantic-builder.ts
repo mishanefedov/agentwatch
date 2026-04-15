@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { translateClaudeLine } from "../adapters/claude-code.js";
 import { translateCodexLine, codexSessionsDir } from "../adapters/codex.js";
+import { translateSession as translateOpenClawSession } from "../adapters/openclaw.js";
 import type { AgentEvent } from "../schema.js";
 import {
   indexedIds,
@@ -48,6 +49,7 @@ export async function buildSemanticIndex(opts: {
   const claudeRoot = path.join(home, ".claude", "projects");
   const codexRoot = codexSessionsDir(home);
   const geminiRoot = path.join(home, ".gemini", "tmp");
+  const openclawRoot = path.join(home, ".openclaw", "agents");
 
   for (const file of walkJsonl(claudeRoot)) {
     if (opts.signal?.aborted) break;
@@ -63,6 +65,13 @@ export async function buildSemanticIndex(opts: {
     if (opts.signal?.aborted) break;
     progress.scannedFiles += 1;
     collectGeminiTurns(file, already, queue);
+  }
+  for (const file of walkJsonl(openclawRoot)) {
+    if (opts.signal?.aborted) break;
+    // Only index session files (not logs/config-audit).
+    if (!file.includes(path.sep + "sessions" + path.sep)) continue;
+    progress.scannedFiles += 1;
+    collectOpenClawTurns(file, already, queue);
   }
 
   progress.queuedTurns = queue.length;
@@ -235,6 +244,39 @@ function groupAndQueue(
     }
   }
   push();
+}
+
+// ─── OpenClaw collector ────────────────────────────────────────────────
+
+function collectOpenClawTurns(
+  file: string,
+  already: Set<string>,
+  queue: IndexTurn[],
+): void {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    return;
+  }
+  const sessionId = path.basename(file, ".jsonl");
+  // Path shape: ~/.openclaw/agents/<subAgent>/sessions/<id>.jsonl
+  const parts = file.split(path.sep);
+  const agentsIdx = parts.lastIndexOf("agents");
+  const subAgent = agentsIdx >= 0 ? (parts[agentsIdx + 1] ?? "main") : "main";
+  const events: AgentEvent[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      const ev = translateOpenClawSession(obj, subAgent, sessionId);
+      if (ev) events.push(ev);
+    } catch {
+      /* skip malformed */
+    }
+  }
+  const project = events[0]?.summary?.match(/^\[([^\]]+)\]/)?.[1] ?? subAgent;
+  groupAndQueue("openclaw", sessionId, project, events, already, queue);
 }
 
 // ─── Gemini collector ──────────────────────────────────────────────────
