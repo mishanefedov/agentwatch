@@ -2,11 +2,15 @@ import { Box, Text } from "ink";
 import type { ClaudePermissions } from "../util/claude-permissions.js";
 import type { CursorStatus } from "../adapters/cursor.js";
 import type { OpenClawConfig } from "../util/openclaw-config.js";
+import type { CodexPermissions } from "../util/codex-permissions.js";
+import type { GeminiPermissions } from "../util/gemini-permissions.js";
 
 interface Props {
   claude: ClaudePermissions[];
   cursor?: CursorStatus;
   openclaw: OpenClawConfig | null;
+  codex?: CodexPermissions;
+  gemini?: GeminiPermissions;
   /** How many rows (beyond header + footer) can fit in the visible box. */
   viewportRows: number;
   /** Scroll offset in rows, 0 = top. */
@@ -25,10 +29,12 @@ export function PermissionView({
   claude,
   cursor,
   openclaw,
+  codex,
+  gemini,
   viewportRows,
   scrollOffset,
 }: Props) {
-  const rows = buildRows(claude, cursor, openclaw);
+  const rows = buildRows(claude, cursor, openclaw, codex, gemini);
   const height = Math.max(3, viewportRows);
   const maxScroll = Math.max(0, rows.length - height);
   const offset = Math.min(scrollOffset, maxScroll);
@@ -98,6 +104,8 @@ function buildRows(
   claude: ClaudePermissions[],
   cursor: CursorStatus | undefined,
   openclaw: OpenClawConfig | null,
+  codex?: CodexPermissions,
+  gemini?: GeminiPermissions,
 ): Row[] {
   const rows: Row[] = [];
 
@@ -253,6 +261,91 @@ function buildRows(
     dim: true,
   });
 
+  // ─── Codex ───────────────────────────────────────────────────────────
+  if (codex) {
+    rows.push({ kind: "blank" });
+    rows.push({ kind: "h1", text: "Codex", color: "green" });
+    if (!codex.present) {
+      rows.push({ kind: "text", text: "  No ~/.codex/config.toml found.", dim: true });
+    } else {
+      rows.push({ kind: "kv", label: "config", value: codex.configPath });
+      if (codex.model) rows.push({ kind: "kv", label: "model", value: codex.model });
+      if (codex.approvalPolicy) {
+        rows.push({
+          kind: "kv",
+          label: "approval_policy",
+          value: codex.approvalPolicy,
+          valueColor: codex.approvalPolicy === "never" ? "red" : "yellow",
+        });
+      }
+      if (codex.sandboxPolicy) {
+        rows.push({
+          kind: "kv",
+          label: "sandbox_policy",
+          value: codex.sandboxPolicy,
+          valueColor:
+            codex.sandboxPolicy === "danger-full-access" ? "red" : "green",
+        });
+      }
+      if (codex.networkAccess !== undefined) {
+        rows.push({
+          kind: "kv",
+          label: "network_access",
+          value: String(codex.networkAccess),
+          valueColor: codex.networkAccess ? "red" : "green",
+        });
+      }
+      if (codex.writableRoots && codex.writableRoots.length > 0) {
+        rows.push({ kind: "h2", text: "Writable roots" });
+        for (const r of codex.writableRoots.slice(0, 8)) {
+          rows.push({ kind: "item", mark: "●", markColor: "yellow", text: r });
+        }
+      }
+      if (codex.projects.length > 0) {
+        rows.push({ kind: "h2", text: "Projects" });
+        for (const p of codex.projects.slice(0, 10)) {
+          rows.push({
+            kind: "item",
+            mark: "●",
+            markColor: p.trustLevel === "trusted" ? "green" : "yellow",
+            text: `${p.cwd}  (${p.trustLevel})`,
+          });
+        }
+      }
+    }
+  }
+
+  // ─── Gemini CLI ──────────────────────────────────────────────────────
+  if (gemini) {
+    rows.push({ kind: "blank" });
+    rows.push({ kind: "h1", text: "Gemini CLI", color: "blue" });
+    if (!gemini.present) {
+      rows.push({ kind: "text", text: "  No ~/.gemini/settings.json found.", dim: true });
+    } else {
+      rows.push({ kind: "kv", label: "settings", value: gemini.settingsPath });
+      if (gemini.authType)
+        rows.push({ kind: "kv", label: "auth", value: gemini.authType });
+      if (gemini.selectedModel)
+        rows.push({ kind: "kv", label: "model", value: gemini.selectedModel });
+      if (gemini.toolsAllow && gemini.toolsAllow.length > 0) {
+        rows.push({ kind: "h2", text: "Allowed tools" });
+        for (const t of gemini.toolsAllow.slice(0, 10))
+          rows.push({ kind: "item", mark: "✓", markColor: "green", text: t });
+      }
+      if (gemini.toolsBlock && gemini.toolsBlock.length > 0) {
+        rows.push({ kind: "h2", text: "Blocked tools" });
+        for (const t of gemini.toolsBlock.slice(0, 10))
+          rows.push({ kind: "item", mark: "✗", markColor: "red", text: t });
+      }
+      if (gemini.trustedFolders.length > 0) {
+        rows.push({ kind: "h2", text: "Trusted folders" });
+        for (const f of gemini.trustedFolders.slice(0, 8)) {
+          rows.push({ kind: "item", mark: "●", markColor: "green", text: f });
+        }
+      }
+    }
+  }
+
   return rows;
 }
 
@@ -267,6 +360,8 @@ export function permissionRowCount(
   claude: ClaudePermissions[],
   cursor: CursorStatus | undefined,
   openclaw: OpenClawConfig | null,
+  codex?: CodexPermissions,
+  gemini?: GeminiPermissions,
 ): number {
-  return buildRows(claude, cursor, openclaw).length;
+  return buildRows(claude, cursor, openclaw, codex, gemini).length;
 }

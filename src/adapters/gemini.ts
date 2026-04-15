@@ -78,6 +78,17 @@ export function startGeminiAdapter(sink: Emit): () => void {
 
       const ev = translate(msg, sessionId, kind, project);
       if (ev) emit(ev);
+
+      // Each Gemini assistant message can carry an array of toolCalls,
+      // each already including the inline functionResponse. Emit one
+      // event per tool with the result attached — no pairing needed.
+      const toolCalls = msg.toolCalls;
+      if (Array.isArray(toolCalls)) {
+        for (const tc of toolCalls) {
+          const te = translateToolCall(tc, msg, sessionId, kind, project);
+          if (te) emit(te);
+        }
+      }
     }
   };
 
@@ -121,12 +132,7 @@ function translate(
   }
 
   const usage = extractGeminiUsage(msg);
-  const model =
-    typeof msg.model === "string"
-      ? msg.model
-      : typeof msg.modelVersion === "string"
-        ? msg.modelVersion
-        : "gemini-2.5-pro";
+  const model = pickModel(msg);
   const cost = usage ? costOf(model, usage) : undefined;
 
   return {
@@ -144,6 +150,108 @@ function translate(
       ...(typeof (msg.thoughts as unknown) === "string" && msg.thoughts
         ? { thinking: msg.thoughts as string }
         : {}),
+    },
+  };
+}
+
+function pickModel(msg: Record<string, unknown>): string {
+  if (typeof msg.model === "string") return msg.model;
+  if (typeof msg.modelVersion === "string") return msg.modelVersion;
+  return "gemini-2.5-pro";
+}
+
+/** Map a Gemini tool name to our event type + shape. */
+function inferGeminiToolType(name: string): {
+  type: EventType;
+  path?: "file_path" | "path" | null;
+} {
+  const n = name.toLowerCase();
+  if (n === "read_file" || n === "read_many_files") {
+    return { type: "file_read", path: "file_path" };
+  }
+  if (
+    n === "write_file" ||
+    n === "replace" ||
+    n === "edit" ||
+    n === "create_file"
+  ) {
+    return { type: "file_write", path: "file_path" };
+  }
+  if (n === "run_shell_command" || n === "shell") {
+    return { type: "shell_exec" };
+  }
+  return { type: "tool_call" };
+}
+
+/** Extract the result string out of Gemini's nested toolCall.result shape:
+ *  [{ functionResponse: { response: { output: "..." } } }] */
+function extractToolResult(raw: unknown): {
+  text: string;
+  isError: boolean;
+} {
+  if (!Array.isArray(raw)) return { text: "", isError: false };
+  const parts: string[] = [];
+  let isError = false;
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const fr = (item as Record<string, unknown>).functionResponse;
+    if (!fr || typeof fr !== "object") continue;
+    const resp = (fr as Record<string, unknown>).response;
+    if (!resp || typeof resp !== "object") continue;
+    const r = resp as Record<string, unknown>;
+    const out = r.output ?? r.error ?? r.content;
+    if (typeof out === "string") parts.push(out);
+    else if (out != null) parts.push(JSON.stringify(out));
+    if (r.error) isError = true;
+  }
+  return { text: parts.join("\n\n").slice(0, 50_000), isError };
+}
+
+function translateToolCall(
+  tc: unknown,
+  parent: Record<string, unknown>,
+  sessionId: string,
+  kind: string,
+  project: string,
+): AgentEvent | null {
+  if (!tc || typeof tc !== "object") return null;
+  const c = tc as Record<string, unknown>;
+  const name = typeof c.name === "string" ? c.name : "tool";
+  const id = typeof c.id === "string" ? c.id : undefined;
+  const args = (c.args ?? {}) as Record<string, unknown>;
+  const { type, path: pathKey } = inferGeminiToolType(name);
+  const path =
+    pathKey && typeof args[pathKey] === "string"
+      ? (args[pathKey] as string)
+      : undefined;
+  const cmd =
+    type === "shell_exec" && typeof args.command === "string"
+      ? (args.command as string)
+      : undefined;
+  const ts = clampTs(
+    typeof parent.timestamp === "string"
+      ? parent.timestamp
+      : new Date().toISOString(),
+  );
+  const subAgentSuffix = kind === "subagent" ? " / sub:gemini" : "";
+  const prefix = project ? `[${project}${subAgentSuffix}] ` : "";
+  const { text: toolResult, isError } = extractToolResult(c.result);
+  return {
+    id: nextId(),
+    ts,
+    agent: "gemini",
+    type,
+    tool: `gemini:${name}`,
+    sessionId,
+    path,
+    cmd,
+    riskScore: riskOf(type, path, cmd),
+    summary: prefix + (cmd ?? path ?? name),
+    details: {
+      toolInput: args,
+      toolUseId: id,
+      ...(toolResult ? { toolResult } : {}),
+      ...(isError ? { toolError: true } : {}),
     },
   };
 }

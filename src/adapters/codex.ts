@@ -17,17 +17,18 @@ export function codexSessionsDir(home: string = os.homedir()): string {
 interface Cursor {
   offset: number;
   project: string;
-  /** Model captured from session_meta / turn_context lines, used when
-   *  enriching a response event with usage so cost / OTel span names
-   *  are populated. */
+  /** Model captured from session_meta / turn_context lines. */
   model?: string;
-  /** Event id of the most recently emitted assistant response, so we
-   *  can attach a later token_count event's usage data to it. */
+  /** Event id of the most recently emitted assistant response. */
   lastResponseId?: string;
-  /** Usage last attributed to this cursor — used to de-dupe repeated
-   *  token_count events that carry the same last_token_usage. */
+  /** Usage last attributed to this cursor — dedup key. */
   lastUsageKey?: string;
+  /** Pending tool_use events waiting for their function_call_output,
+   *  keyed by call_id. Bounded to prevent leaks on malformed sessions. */
+  pendingCalls: Map<string, { eventId: string; startMs: number }>;
 }
+
+const MAX_PENDING = 2000;
 
 export function startCodexAdapter(sink: EventSink): () => void {
   const dir = codexSessionsDir();
@@ -47,7 +48,11 @@ export function startCodexAdapter(sink: EventSink): () => void {
     let cursor = cursors.get(file);
     if (!cursor) {
       const start = isInitialAdd ? Math.max(0, size - BACKFILL_BYTES) : size;
-      cursor = { offset: start, project: "" };
+      cursor = {
+        offset: start,
+        project: "",
+        pendingCalls: new Map(),
+      };
       cursors.set(file, cursor);
     }
     if (size <= cursor.offset) return;
@@ -116,10 +121,60 @@ export function startCodexAdapter(sink: EventSink): () => void {
           }
           return;
         }
+        // Handle function_call_output — pair with a pending tool event.
+        const payload = (obj.payload ?? {}) as Record<string, unknown>;
+        if (
+          obj.type === "response_item" &&
+          payload.type === "function_call_output"
+        ) {
+          const callId =
+            typeof payload.call_id === "string" ? payload.call_id : "";
+          const pend = callId ? cursor!.pendingCalls.get(callId) : undefined;
+          if (pend) {
+            cursor!.pendingCalls.delete(callId);
+            const out = payload.output;
+            const outText =
+              typeof out === "string"
+                ? out
+                : out && typeof out === "object"
+                  ? String(
+                      (out as Record<string, unknown>).content ??
+                        JSON.stringify(out),
+                    )
+                  : "";
+            const isError =
+              !!out &&
+              typeof out === "object" &&
+              (out as Record<string, unknown>).status === "error";
+            const ts = typeof obj.timestamp === "string" ? obj.timestamp : "";
+            const duration = ts
+              ? Math.max(0, new Date(ts).getTime() - pend.startMs)
+              : undefined;
+            sink.enrich(pend.eventId, {
+              toolResult: outText.slice(0, 50_000),
+              toolError: isError,
+              ...(duration != null ? { durationMs: duration } : {}),
+            });
+          }
+          return;
+        }
+
         const event = translate(obj, sessionId, cursor!.project);
         if (event) {
           sink.emit(event);
           if (event.type === "response") cursor!.lastResponseId = event.id;
+          // Track function_call events by call_id for later pairing.
+          const cid = event.details?.toolUseId;
+          if (cid && event.type !== "response" && event.type !== "prompt") {
+            cursor!.pendingCalls.set(cid, {
+              eventId: event.id,
+              startMs: new Date(event.ts).getTime(),
+            });
+            if (cursor!.pendingCalls.size > MAX_PENDING) {
+              const firstKey = cursor!.pendingCalls.keys().next().value;
+              if (firstKey !== undefined) cursor!.pendingCalls.delete(firstKey);
+            }
+          }
         }
       } catch {
         /* malformed line */
@@ -185,10 +240,17 @@ function translate(
     }
     if (pType === "function_call") {
       const name = (payload.name as string | undefined) ?? "";
+      const callId =
+        typeof payload.call_id === "string" ? payload.call_id : "";
       const argsRaw = payload.arguments;
       const args = safeJson(typeof argsRaw === "string" ? argsRaw : "");
-      if (name === "exec_command" || name === "shell") {
-        const cmd = typeof args?.cmd === "string" ? args.cmd : "";
+      if (name === "exec_command" || name === "shell" || name === "write_stdin") {
+        const cmd =
+          typeof args?.cmd === "string"
+            ? args.cmd
+            : typeof args?.input === "string"
+              ? (args.input as string).slice(0, 200)
+              : "";
         return {
           id: nextId(),
           ts,
@@ -201,6 +263,7 @@ function translate(
           summary: `[${project}] shell: ${truncate(cmd, 80)}`,
           details: {
             toolInput: (args as Record<string, unknown> | null) ?? undefined,
+            toolUseId: callId || undefined,
           },
         };
       }
@@ -215,6 +278,7 @@ function translate(
         summary: `[${project}] tool: ${name}`,
         details: {
           toolInput: (args as Record<string, unknown> | null) ?? undefined,
+          toolUseId: callId || undefined,
         },
       };
     }
