@@ -361,6 +361,18 @@ export function translateClaudeLine(
   if (type === "user" || role === "user") {
     const text = extractUserText(content);
     if (!text) return null; // suppress tool_result-only user turns
+    if (o.isCompactSummary === true) {
+      return {
+        id: nextId(),
+        ts,
+        agent: "claude-code",
+        type: "compaction",
+        summary: prefix + "⋈ context compacted — " + truncate(text, 60),
+        sessionId,
+        riskScore: riskOf("compaction"),
+        details: { fullText: text },
+      };
+    }
     return {
       id: nextId(),
       ts,
