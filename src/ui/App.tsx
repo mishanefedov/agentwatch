@@ -15,6 +15,8 @@ import { restoreTerminal } from "../util/terminal.js";
 import { attributeTokens } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
+import { searchAllSessions, type SearchHit } from "../util/cross-search.js";
+import { CrossSearchView } from "./CrossSearchView.js";
 import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
 import { Breadcrumb } from "./Breadcrumb.js";
@@ -91,6 +93,12 @@ type State = {
   showHelp: boolean;
   /** Token-attribution overlay for the currently scoped session. */
   showTokens: boolean;
+  /** Cross-session search view state. */
+  crossSearchOpen: boolean;
+  crossSearchQuery: string;
+  crossSearchTyping: boolean;
+  crossSearchResults: SearchHit[];
+  crossSearchIdx: number;
 };
 
 type Action =
@@ -121,6 +129,12 @@ type Action =
   | { type: "flash-clear" }
   | { type: "toggle-help" }
   | { type: "toggle-tokens" }
+  | { type: "cross-open" }
+  | { type: "cross-close" }
+  | { type: "cross-type"; char: string }
+  | { type: "cross-backspace" }
+  | { type: "cross-submit"; hits: SearchHit[] }
+  | { type: "cross-move"; delta: number }
   | { type: "home" }
   | { type: "back" }
   | { type: "open-sessions"; project: string }
@@ -284,6 +298,45 @@ function reducer(state: State, action: Action): State {
       return { ...state, showHelp: !state.showHelp };
     case "toggle-tokens":
       return { ...state, showTokens: !state.showTokens };
+    case "cross-open":
+      return {
+        ...state,
+        crossSearchOpen: true,
+        crossSearchTyping: true,
+        crossSearchQuery: "",
+        crossSearchResults: [],
+        crossSearchIdx: 0,
+      };
+    case "cross-close":
+      return {
+        ...state,
+        crossSearchOpen: false,
+        crossSearchTyping: false,
+        crossSearchQuery: "",
+        crossSearchResults: [],
+      };
+    case "cross-type":
+      return { ...state, crossSearchQuery: state.crossSearchQuery + action.char };
+    case "cross-backspace":
+      return {
+        ...state,
+        crossSearchQuery: state.crossSearchQuery.slice(0, -1),
+      };
+    case "cross-submit":
+      return {
+        ...state,
+        crossSearchTyping: false,
+        crossSearchResults: action.hits,
+        crossSearchIdx: 0,
+      };
+    case "cross-move": {
+      const max = Math.max(1, state.crossSearchResults.length);
+      const next = Math.max(
+        0,
+        Math.min(max - 1, state.crossSearchIdx + action.delta),
+      );
+      return { ...state, crossSearchIdx: next };
+    }
     case "home":
       // Reset every view / filter / scope back to the default timeline
       return {
@@ -372,6 +425,11 @@ export function App() {
     flashMessage: null,
     showHelp: false,
     showTokens: false,
+    crossSearchOpen: false,
+    crossSearchQuery: "",
+    crossSearchTyping: false,
+    crossSearchResults: [],
+    crossSearchIdx: 0,
   });
 
   useEffect(() => {
@@ -446,6 +504,50 @@ export function App() {
       exit();
       restoreTerminal();
       setImmediate(() => process.exit(0));
+      return;
+    }
+
+    // Cross-session search overlay: its own input loop
+    if (state.crossSearchOpen) {
+      if (key.escape) {
+        dispatch({ type: "cross-close" });
+        return;
+      }
+      if (state.crossSearchTyping) {
+        if (key.return) {
+          const hits = searchAllSessions(state.crossSearchQuery, 100);
+          dispatch({ type: "cross-submit", hits });
+          return;
+        }
+        if (key.backspace || key.delete) {
+          dispatch({ type: "cross-backspace" });
+          return;
+        }
+        if (input && !key.ctrl && !key.meta) {
+          dispatch({ type: "cross-type", char: input });
+          return;
+        }
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        dispatch({ type: "cross-move", delta: 1 });
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        dispatch({ type: "cross-move", delta: -1 });
+        return;
+      }
+      if (key.return) {
+        const hit = state.crossSearchResults[state.crossSearchIdx];
+        if (hit) {
+          dispatch({ type: "cross-close" });
+          dispatch({
+            type: "sessions-open-selected",
+            sessionId: hit.sessionId,
+          });
+        }
+        return;
+      }
       return;
     }
 
@@ -585,6 +687,7 @@ export function App() {
       return;
     }
     if (input === "/") dispatch({ type: "open-search" });
+    if (input === "?") dispatch({ type: "cross-open" });
     if (input === "x" && state.selectedIdx !== null) {
       const ev = filtered[state.selectedIdx];
       const sid = ev?.details?.subAgentId;
@@ -697,6 +800,13 @@ export function App() {
       />
       {state.showHelp ? (
         <HelpView />
+      ) : state.crossSearchOpen ? (
+        <CrossSearchView
+          query={state.crossSearchQuery}
+          hits={state.crossSearchResults}
+          selectedIdx={state.crossSearchIdx}
+          viewportRows={Math.max(3, rows - 8)}
+        />
       ) : state.showTokens && state.sessionFilter ? (
         <TokensView
           breakdown={attributeTokens(state.events, state.sessionFilter)}
