@@ -26,6 +26,32 @@ const RATES: Record<
     cacheRead: 0.1,
     output: 5.0,
   },
+  // Gemini 2.5 Pro — Jan 2026 public rates.
+  "gemini-2.5-pro": {
+    input: 1.25,
+    cacheCreate: 1.25,
+    cacheRead: 0.31,
+    output: 10.0,
+  },
+  "gemini-2.5-flash": {
+    input: 0.075,
+    cacheCreate: 0.075,
+    cacheRead: 0.019,
+    output: 0.3,
+  },
+  // Codex (GPT-5.x-class) — public OpenAI pricing, Jan 2026.
+  "gpt-5": {
+    input: 1.25,
+    cacheCreate: 1.25,
+    cacheRead: 0.125,
+    output: 10.0,
+  },
+  "gpt-5-mini": {
+    input: 0.25,
+    cacheCreate: 0.25,
+    cacheRead: 0.025,
+    output: 2.0,
+  },
   // Fallback for unknown / synthetic models
   default: {
     input: 3.0,
@@ -63,7 +89,17 @@ export function formatUSD(n: number): string {
 
 function normalizeModel(model: string): string {
   // e.g. "claude-opus-4-6[1m]" → "claude-opus-4-6"
-  return model.replace(/\[.*?\]$/, "").toLowerCase();
+  // "gpt-5.4" → "gpt-5", "gemini-2.5-pro-preview" → "gemini-2.5-pro"
+  const base = model.replace(/\[.*?\]$/, "").toLowerCase();
+  if (base.startsWith("gpt-5")) {
+    if (base.includes("mini")) return "gpt-5-mini";
+    return "gpt-5";
+  }
+  if (base.startsWith("gemini-2.5")) {
+    if (base.includes("flash")) return "gemini-2.5-flash";
+    return "gemini-2.5-pro";
+  }
+  return base;
 }
 
 export function parseUsage(obj: unknown): Usage | null {

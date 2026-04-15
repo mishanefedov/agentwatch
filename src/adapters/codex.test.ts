@@ -48,6 +48,21 @@ describe("extractTokenUsage", () => {
   });
 });
 
+describe("isCompactionEvent", () => {
+  it("flags turn_truncated payloads", async () => {
+    const { isCompactionEvent } = await import("./codex.js");
+    expect(
+      isCompactionEvent({ type: "event_msg", payload: { type: "turn_truncated" } }),
+    ).toBe(true);
+  });
+  it("ignores unrelated event_msg payloads", async () => {
+    const { isCompactionEvent } = await import("./codex.js");
+    expect(
+      isCompactionEvent({ type: "event_msg", payload: { type: "token_count" } }),
+    ).toBe(false);
+  });
+});
+
 describe("codexSessionsDir", () => {
   it("resolves to ~/.codex/sessions", () => {
     expect(codexSessionsDir("/home/u")).toBe("/home/u/.codex/sessions");

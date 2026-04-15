@@ -170,6 +170,36 @@ function extractSubAgent(file: string): string {
   return "unknown";
 }
 
+/** OpenClaw records usage on the assistant message directly:
+ *   { input, output, cacheRead, cacheWrite, totalTokens, cost: {…} }
+ *
+ *  Fields map cleanly onto our schema except cacheWrite → cacheCreate. */
+export function extractOpenClawUsage(
+  msg: Record<string, unknown> | undefined,
+): { input: number; cacheCreate: number; cacheRead: number; output: number } | null {
+  const u = msg?.usage;
+  if (!u || typeof u !== "object") return null;
+  const o = u as Record<string, unknown>;
+  const n = (v: unknown): number => (typeof v === "number" ? v : 0);
+  const input = n(o.input);
+  const output = n(o.output);
+  const cacheRead = n(o.cacheRead);
+  const cacheCreate = n(o.cacheWrite);
+  if (input + output + cacheRead + cacheCreate === 0) return null;
+  return { input, cacheCreate, cacheRead, output };
+}
+
+export function extractOpenClawCost(
+  msg: Record<string, unknown> | undefined,
+): number | null {
+  const u = msg?.usage;
+  if (!u || typeof u !== "object") return null;
+  const c = (u as Record<string, unknown>).cost;
+  if (!c || typeof c !== "object") return null;
+  const total = (c as Record<string, unknown>).total;
+  return typeof total === "number" ? total : null;
+}
+
 export function translateSession(
   obj: unknown,
   subAgent: string,
@@ -239,6 +269,10 @@ export function translateSession(
       });
     }
     if (role === "assistant") {
+      const usage = extractOpenClawUsage(msg);
+      const model =
+        typeof msg?.model === "string" ? msg.model : undefined;
+      const precomputedCost = extractOpenClawCost(msg);
       const toolUse = extractToolUse(content);
       if (toolUse) {
         const type = inferToolType(toolUse.name);
@@ -247,13 +281,23 @@ export function translateSession(
           path: toolUse.path,
           cmd: toolUse.cmd,
           summary: truncate(toolUse.summary),
-          details: { toolInput: toolUse.input },
+          details: {
+            toolInput: toolUse.input,
+            ...(usage ? { usage } : {}),
+            ...(precomputedCost != null ? { cost: precomputedCost } : {}),
+            ...(model ? { model } : {}),
+          },
         });
       }
       if (!text) return null; // suppress empty assistant messages
       return base("response", {
         summary: truncate(text),
-        details: { fullText: text },
+        details: {
+          fullText: text,
+          ...(usage ? { usage } : {}),
+          ...(precomputedCost != null ? { cost: precomputedCost } : {}),
+          ...(model ? { model } : {}),
+        },
       });
     }
   }
