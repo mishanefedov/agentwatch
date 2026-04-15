@@ -12,7 +12,7 @@ import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
 import { exportSession } from "../util/export.js";
 import { restoreTerminal } from "../util/terminal.js";
-import { attributeTokens } from "../util/token-attribution.js";
+import { attributeTokens, attributeTurns } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
 import { CompactionView, compactionPointCount } from "./CompactionView.js";
@@ -105,6 +105,8 @@ type State = {
   /** Compaction visualizer overlay for the currently scoped session. */
   showCompaction: boolean;
   compactionSelectedIdx: number;
+  /** Selected turn within the token-attribution view. */
+  tokensSelectedIdx: number;
   /** Cross-session search view state. */
   crossSearchOpen: boolean;
   crossSearchQuery: string;
@@ -149,6 +151,7 @@ type Action =
   | { type: "toggle-tokens" }
   | { type: "toggle-compaction" }
   | { type: "compaction-move"; delta: number; max: number }
+  | { type: "tokens-move"; delta: number; max: number }
   | { type: "cross-open" }
   | { type: "cross-close" }
   | { type: "cross-type"; char: string }
@@ -334,6 +337,14 @@ function reducer(state: State, action: Action): State {
       );
       return { ...state, compactionSelectedIdx: next };
     }
+    case "tokens-move": {
+      if (action.max <= 0) return state;
+      const next = Math.max(
+        0,
+        Math.min(action.max - 1, state.tokensSelectedIdx + action.delta),
+      );
+      return { ...state, tokensSelectedIdx: next };
+    }
     case "cross-open":
       return {
         ...state,
@@ -477,6 +488,7 @@ export function App() {
     anomalyNotified: new Set<string>(),
     showCompaction: false,
     compactionSelectedIdx: 0,
+    tokensSelectedIdx: 0,
   });
 
   useEffect(() => {
@@ -883,6 +895,15 @@ export function App() {
         dispatch({ type: "compaction-move", delta: 1, max });
       }
     }
+    if (state.showTokens && state.sessionFilter) {
+      const max = attributeTurns(state.events, state.sessionFilter).length;
+      if (key.downArrow) {
+        dispatch({ type: "tokens-move", delta: 1, max });
+      }
+      if (key.upArrow) {
+        dispatch({ type: "tokens-move", delta: -1, max });
+      }
+    }
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") {
       dispatch({ type: "set-project-filter", project: null });
@@ -972,7 +993,10 @@ export function App() {
       ) : state.showTokens && state.sessionFilter ? (
         <TokensView
           breakdown={attributeTokens(state.events, state.sessionFilter)}
+          turns={attributeTurns(state.events, state.sessionFilter)}
           sessionId={state.sessionFilter}
+          selectedIdx={state.tokensSelectedIdx}
+          viewportRows={rows}
         />
       ) : state.sessionsForProject ? (
         <SessionsView
