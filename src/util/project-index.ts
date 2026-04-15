@@ -53,6 +53,12 @@ function extractProjectName(e: AgentEvent): string | null {
   return null;
 }
 
+export const STALE_MS = 5 * 60_000;
+
+export function isStale(iso: string, nowMs: number = Date.now()): boolean {
+  return nowMs - new Date(iso).getTime() > STALE_MS;
+}
+
 export function agoFromNow(iso: string): string {
   const then = new Date(iso).getTime();
   const diff = Date.now() - then;

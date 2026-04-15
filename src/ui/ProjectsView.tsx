@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import type { ProjectRow } from "../util/project-index.js";
-import { agoFromNow } from "../util/project-index.js";
+import { agoFromNow, isStale } from "../util/project-index.js";
 import { formatUSD } from "../util/cost.js";
 import type { AgentName } from "../schema.js";
 
@@ -58,7 +58,7 @@ function ProjectRowView({
     .join("  ");
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text inverse={selected}>
+      <Text inverse={selected} dimColor={isStale(row.lastTs)}>
         <Text color="yellow" bold>
           {selected ? "▶ " : "  "}
         </Text>
@@ -67,9 +67,10 @@ function ProjectRowView({
         {row.cost > 0 && (
           <Text dimColor>
             {"  "}
-            <Text color="yellow">{formatUSD(row.cost)}</Text>
+            <Text color={isStale(row.lastTs) ? undefined : "yellow"}>{formatUSD(row.cost)}</Text>
           </Text>
         )}
+        {isStale(row.lastTs) && <Text dimColor> · ⊘ stale</Text>}
       </Text>
       <Text dimColor>
         {"  "}
