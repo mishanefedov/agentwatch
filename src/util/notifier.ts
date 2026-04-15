@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { platform } from "node:os";
 import type { AgentEvent } from "../schema.js";
+import { evalTriggers } from "./triggers.js";
 
 /**
  * Desktop notifications for agentwatch. Fires on a small set of default
@@ -70,6 +71,12 @@ export function shouldNotify(event: AgentEvent): null | {
       title: `⚠ agentwatch — ${tool} failed`,
       body: `${event.agent} in ${projectOf(event) ?? "?"}: ${event.summary ?? ""}`.slice(0, 200),
     });
+  }
+
+  // User-defined triggers (~/.agentwatch/triggers.json)
+  const custom = evalTriggers(event);
+  if (custom) {
+    return gate(`user:${custom.title}:${event.sessionId ?? ""}`, custom);
   }
 
   return null;
