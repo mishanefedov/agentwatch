@@ -125,6 +125,9 @@ type State = {
   crossSearchIdx: number;
   crossSearchMode: "bm25" | "semantic";
   crossSearchIndexStatus: string | null;
+  /** When true, the confirmation modal is showing before we start the
+   *  first-run semantic index build. */
+  crossSearchConfirming: { query: string } | null;
   /** Anomaly banner dismissal — keyed by a signature of current anomalies
    *  so re-flagging a different anomaly reopens the banner. */
   anomalyDismissKey: string | null;
@@ -171,6 +174,8 @@ type Action =
   | { type: "cross-submit"; hits: UnifiedHit[] }
   | { type: "cross-mode"; mode: "bm25" | "semantic" }
   | { type: "cross-index-status"; status: string | null }
+  | { type: "cross-confirm-start"; query: string }
+  | { type: "cross-confirm-cancel" }
   | { type: "cross-move"; delta: number }
   | { type: "anomaly-dismiss"; key: string }
   | { type: "anomaly-mark-notified"; ids: string[] }
@@ -382,6 +387,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, crossSearchMode: action.mode };
     case "cross-index-status":
       return { ...state, crossSearchIndexStatus: action.status };
+    case "cross-confirm-start":
+      return { ...state, crossSearchConfirming: { query: action.query } };
+    case "cross-confirm-cancel":
+      return { ...state, crossSearchConfirming: null };
     case "cross-type":
       return { ...state, crossSearchQuery: state.crossSearchQuery + action.char };
     case "cross-backspace":
@@ -508,6 +517,7 @@ export function App() {
     crossSearchIdx: 0,
     crossSearchMode: "bm25",
     crossSearchIndexStatus: null,
+    crossSearchConfirming: null,
     anomalyDismissKey: null,
     anomalyNotified: new Set<string>(),
     showCompaction: false,
@@ -683,6 +693,20 @@ export function App() {
 
     // Cross-session search overlay: its own input loop
     if (state.crossSearchOpen) {
+      // Confirmation modal for first-run semantic build
+      if (state.crossSearchConfirming) {
+        if (input === "y" || input === "Y") {
+          const q = state.crossSearchConfirming.query;
+          dispatch({ type: "cross-confirm-cancel" });
+          void runSemanticSearch(q, dispatch);
+          return;
+        }
+        if (input === "n" || input === "N" || key.escape) {
+          dispatch({ type: "cross-confirm-cancel" });
+          return;
+        }
+        return;
+      }
       if (key.escape) {
         dispatch({ type: "cross-close" });
         return;
@@ -696,7 +720,13 @@ export function App() {
             );
             dispatch({ type: "cross-submit", hits });
           } else {
-            void runSemanticSearch(q, dispatch);
+            // First-run: show confirmation. Subsequent runs skip the prompt.
+            const needsBuild = !hasIndex() || indexStats().vectors === 0;
+            if (needsBuild) {
+              dispatch({ type: "cross-confirm-start", query: q });
+            } else {
+              void runSemanticSearch(q, dispatch);
+            }
           }
           return;
         }
@@ -1033,6 +1063,7 @@ export function App() {
           viewportRows={Math.max(3, rows - 8)}
           mode={state.crossSearchMode}
           indexingStatus={state.crossSearchIndexStatus}
+          confirming={state.crossSearchConfirming}
         />
       ) : state.showCompaction && state.sessionFilter ? (
         <CompactionView
