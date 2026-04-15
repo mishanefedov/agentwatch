@@ -8,9 +8,9 @@ agentwatch doesn't dump historical alerts.
 
 ## How to invoke
 
-Automatic. Dispatched from `src/util/notifier.ts`. No config file yet —
-triggers are hardcoded; custom regex/threshold triggers are v0.5
-(AUR-108).
+Automatic. Dispatched from `src/util/notifier.ts`. Built-in rules are
+hardcoded; on top of those the user can add their own triggers in
+`~/.agentwatch/triggers.json` (see **Custom triggers** below).
 
 ## Inputs
 
@@ -52,8 +52,58 @@ session (avoids a broken install spamming stderr).
   the local machine of whichever `agentwatch` process handles them.
   SSH remote notifications are future work.
 
+## Custom triggers
+
+Create `~/.agentwatch/triggers.json` with an array of rule objects.
+**Edits are picked up live** — no restart required.
+
+```json
+[
+  {
+    "match": "curl .* \\| (bash|sh)",
+    "title": "pipe-to-shell",
+    "body": "{{agent}}: {{cmd}}"
+  },
+  {
+    "type": "file_write",
+    "pathMatch": "^/etc/",
+    "title": "/etc write",
+    "body": "{{agent}} wrote {{path}}"
+  },
+  {
+    "thresholdUsd": 0.5,
+    "title": "expensive turn",
+    "body": "turn cost {{cost}}"
+  }
+]
+```
+
+### Rule fields
+
+| Field | Type | Purpose |
+|---|---|---|
+| `match` | string (regex) | Tested against `summary\ncmd\npath` |
+| `pathMatch` | string (regex) | Tested against `path` only — narrower |
+| `type` | string | Restrict rule to a specific event type |
+| `thresholdUsd` | number | Minimum per-turn cost before firing |
+| `title` | string (required) | Notification title |
+| `body` | string (required) | Notification body |
+
+### Placeholders
+
+`{{agent}}`, `{{type}}`, `{{cmd}}`, `{{path}}`, `{{tool}}`,
+`{{summary}}`, `{{cost}}`. Unknown tokens expand to the empty string.
+
+### Failure modes (triggers)
+
+- Invalid regex → rule skipped silently.
+- Rule missing `title` or `body` → dropped.
+- Unreadable file → no user rules; built-ins still fire.
+- Per-title rate limit (60s) still applies.
+
 ## Interactions
 
 - Doesn't emit events or mutate state — side effect only.
 - Rate-limit state is process-local (not persisted). Restarting
   agentwatch resets the cache.
+- Triggers file is watched via chokidar; edits take effect on next event.
