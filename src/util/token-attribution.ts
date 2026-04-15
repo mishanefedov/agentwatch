@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { encode as tokenize } from "gpt-tokenizer";
 import type { AgentEvent } from "../schema.js";
 
 export interface TokenBreakdown {
@@ -5,33 +8,149 @@ export interface TokenBreakdown {
   cacheCreate: number;
   cacheRead: number;
   output: number;
-  /** Approximate thinking tokens (text chars / 4). */
+  /** Thinking tokens (tokenizer-measured). */
   thinking: number;
-  /** Approximate tool I/O tokens (toolResult + toolInput chars / 4). */
+  /** Tool I/O tokens (toolResult + toolInput, tokenizer-measured). */
   toolIO: number;
-  /** Approximate user-text tokens (prompt fullText chars / 4). */
+  /** User-text tokens (prompt fullText, tokenizer-measured). */
   user: number;
+  /** Tokens for the workspace's CLAUDE.md (tokenizer-measured). */
+  claudeMd: number;
   /** Total cost in USD summed across assistant turns. */
   cost: number;
   /** Number of assistant turns contributing to these counts. */
   turns: number;
 }
 
-/** Approx char-per-token ratio used for fields we can't measure precisely
- *  (thinking blocks, tool I/O text, raw user prompts). Real tokenizers
- *  would be more accurate, but this is close enough to communicate
- *  relative weight between categories. */
-const CHARS_PER_TOKEN = 4;
+export interface TurnBreakdown {
+  turnIdx: number;
+  ts: string;
+  sessionId: string;
+  model?: string;
+  /** Tokens in each category for this single turn. */
+  user: number;
+  thinking: number;
+  toolIO: number;
+  claudeMd: number;
+  input: number;
+  cacheRead: number;
+  cacheCreate: number;
+  output: number;
+  cost: number;
+}
 
-/** Attribute a session's token footprint across categories. Walks the
- *  events bound to `sessionId` and aggregates from the usage object on
- *  each assistant turn, with approximated categories for anything not
- *  covered by the raw usage. */
+let claudeMdCache: { path: string | null; tokens: number } | null = null;
+
+/** Read the workspace CLAUDE.md (if present) and tokenize once per
+ *  process. Used as a per-turn attribution for turns that include
+ *  the agent's system memory. */
+export function claudeMdTokens(cwd: string = process.cwd()): number {
+  if (claudeMdCache) return claudeMdCache.tokens;
+  const p = path.join(cwd, "CLAUDE.md");
+  if (!fs.existsSync(p)) {
+    claudeMdCache = { path: null, tokens: 0 };
+    return 0;
+  }
+  try {
+    const text = fs.readFileSync(p, "utf8");
+    claudeMdCache = { path: p, tokens: countTokens(text) };
+    return claudeMdCache.tokens;
+  } catch {
+    claudeMdCache = { path: null, tokens: 0 };
+    return 0;
+  }
+}
+
+export function _resetClaudeMdCache(): void {
+  claudeMdCache = null;
+}
+
+/** Real tokenizer. Uses gpt-tokenizer (cl100k_base — OpenAI's vocab);
+ *  Claude uses a similar-but-not-identical tokenizer and typically
+ *  counts ~5% more tokens. Close enough to communicate relative weight.
+ *  The UI labels this as "approximate for Claude" so users know. */
+export function countTokens(text: string): number {
+  if (!text) return 0;
+  try {
+    return tokenize(text).length;
+  } catch {
+    // Tokenizer blew up on some odd input; fall back to char-based.
+    return Math.ceil(text.length / 4);
+  }
+}
+
+/** Legacy approximation; retained for tests asserting the old behaviour
+ *  on non-tokenized text. */
+export function approxTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/** One TurnBreakdown per assistant turn in the session, chronologically
+ *  ordered. User-text tokens come from the *preceding* prompt event (the
+ *  one that triggered this turn). Tool I/O is the sum of toolResult +
+ *  toolInput on the turn + any tool events that ran as part of it. */
+export function attributeTurns(
+  events: AgentEvent[],
+  sessionId: string,
+  cwd: string = process.cwd(),
+): TurnBreakdown[] {
+  const inSession = events
+    .filter((e) => e.sessionId === sessionId)
+    .sort((a, b) => (a.ts < b.ts ? -1 : 1));
+  const claudeMd = claudeMdTokens(cwd);
+  const breakdowns: TurnBreakdown[] = [];
+  let pendingUserTokens = 0;
+  let pendingToolIO = 0;
+  let turnIdx = 0;
+
+  for (const e of inSession) {
+    if (e.type === "prompt" && e.details?.fullText) {
+      pendingUserTokens += countTokens(e.details.fullText);
+      continue;
+    }
+    // Non-assistant tool rows (e.g. file_read echoed from fs-watcher)
+    // aren't attributed to a specific turn, so fold their I/O into the
+    // next assistant turn.
+    const d = e.details;
+    if (!d) continue;
+    if (d.toolResult) pendingToolIO += countTokens(d.toolResult);
+    if (d.toolInput) {
+      pendingToolIO += countTokens(JSON.stringify(d.toolInput));
+    }
+    if (!d.usage) continue;
+
+    turnIdx += 1;
+    const thinking = d.thinking ? countTokens(d.thinking) : 0;
+    breakdowns.push({
+      turnIdx,
+      ts: e.ts,
+      sessionId,
+      model: d.model,
+      user: pendingUserTokens,
+      thinking,
+      toolIO: pendingToolIO,
+      claudeMd,
+      input: d.usage.input,
+      cacheRead: d.usage.cacheRead,
+      cacheCreate: d.usage.cacheCreate,
+      output: d.usage.output,
+      cost: d.cost ?? 0,
+    });
+    pendingUserTokens = 0;
+    pendingToolIO = 0;
+  }
+  return breakdowns;
+}
+
+/** Attribute a session's token footprint across categories. Aggregate
+ *  of the per-turn breakdown. */
 export function attributeTokens(
   events: AgentEvent[],
   sessionId: string,
+  cwd: string = process.cwd(),
 ): TokenBreakdown {
-  const zero: TokenBreakdown = {
+  const turns = attributeTurns(events, sessionId, cwd);
+  const out: TokenBreakdown = {
     input: 0,
     cacheCreate: 0,
     cacheRead: 0,
@@ -39,32 +158,23 @@ export function attributeTokens(
     thinking: 0,
     toolIO: 0,
     user: 0,
+    claudeMd: 0,
     cost: 0,
-    turns: 0,
+    turns: turns.length,
   };
-  for (const e of events) {
-    if (e.sessionId !== sessionId) continue;
-    const d = e.details;
-    if (!d) continue;
-    const u = d.usage;
-    if (u) {
-      zero.input += u.input;
-      zero.cacheCreate += u.cacheCreate;
-      zero.cacheRead += u.cacheRead;
-      zero.output += u.output;
-      zero.turns += 1;
-    }
-    if (d.cost) zero.cost += d.cost;
-    if (d.thinking) zero.thinking += approxTokens(d.thinking);
-    if (d.toolResult) zero.toolIO += approxTokens(d.toolResult);
-    if (d.toolInput) zero.toolIO += approxTokens(JSON.stringify(d.toolInput));
-    if (e.type === "prompt" && d.fullText) zero.user += approxTokens(d.fullText);
+  for (const t of turns) {
+    out.input += t.input;
+    out.cacheCreate += t.cacheCreate;
+    out.cacheRead += t.cacheRead;
+    out.output += t.output;
+    out.thinking += t.thinking;
+    out.toolIO += t.toolIO;
+    out.user += t.user;
+    out.cost += t.cost;
   }
-  return zero;
-}
-
-export function approxTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+  // CLAUDE.md is a constant overhead — include it once, not per turn.
+  out.claudeMd = turns.length > 0 ? turns[0]!.claudeMd : 0;
+  return out;
 }
 
 export function totalTokens(b: TokenBreakdown): number {
