@@ -7,7 +7,7 @@ import {
   attributeTurns,
   approxTokens,
   countTokens,
-  _resetClaudeMdCache,
+  _resetMemoryFileCache,
 } from "./token-attribution.js";
 import type { AgentEvent } from "../schema.js";
 
@@ -21,7 +21,7 @@ const evt = (o: Partial<AgentEvent>): AgentEvent => ({
   ...o,
 });
 
-beforeEach(() => _resetClaudeMdCache());
+beforeEach(() => _resetMemoryFileCache());
 
 describe("countTokens", () => {
   it("returns 0 for empty string", () => {
@@ -118,7 +118,7 @@ describe("attributeTurns", () => {
       }),
     ];
     const turns = attributeTurns(events, "s1", tmp);
-    expect(turns[0]!.claudeMd).toBeGreaterThan(0);
+    expect(turns[0]!.memoryFile).toBeGreaterThan(0);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 });

@@ -1,5 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { codexSessionsDir, translateCodexLine } from "./codex.js";
+import {
+  codexSessionsDir,
+  translateCodexLine,
+  extractTokenUsage,
+} from "./codex.js";
+
+describe("extractTokenUsage", () => {
+  it("pulls usage out of a token_count event and maps reasoning into output", () => {
+    const usage = extractTokenUsage({
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 50,
+            output_tokens: 20,
+            reasoning_output_tokens: 5,
+          },
+        },
+      },
+    });
+    expect(usage).toEqual({
+      input: 100,
+      cacheRead: 50,
+      cacheCreate: 0,
+      output: 25,
+    });
+  });
+
+  it("returns null for rate-limit-only token_count events (info === null)", () => {
+    expect(
+      extractTokenUsage({
+        type: "event_msg",
+        payload: { type: "token_count", info: null },
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null for non-token_count events", () => {
+    expect(
+      extractTokenUsage({
+        type: "event_msg",
+        payload: { type: "agent_message" },
+      }),
+    ).toBeNull();
+  });
+});
 
 describe("codexSessionsDir", () => {
   it("resolves to ~/.codex/sessions", () => {
