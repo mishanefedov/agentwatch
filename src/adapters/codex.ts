@@ -6,6 +6,7 @@ import os from "node:os";
 import type { AgentEvent, EventSink, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
+import { costOf } from "../util/cost.js";
 
 const BACKFILL_BYTES = 4 * 1024 * 1024;
 
@@ -16,6 +17,10 @@ export function codexSessionsDir(home: string = os.homedir()): string {
 interface Cursor {
   offset: number;
   project: string;
+  /** Model captured from session_meta / turn_context lines, used when
+   *  enriching a response event with usage so cost / OTel span names
+   *  are populated. */
+  model?: string;
   /** Event id of the most recently emitted assistant response, so we
    *  can attach a later token_count event's usage data to it. */
   lastResponseId?: string;
@@ -71,6 +76,13 @@ export function startCodexAdapter(sink: EventSink): () => void {
         if (obj.type === "session_meta") {
           const cwd = obj.payload?.cwd;
           if (typeof cwd === "string") cursor!.project = projectOf(cwd);
+          const model = obj.payload?.model;
+          if (typeof model === "string") cursor!.model = model;
+          return;
+        }
+        if (obj.type === "turn_context") {
+          const model = obj.payload?.model;
+          if (typeof model === "string") cursor!.model = model;
           return;
         }
         // Pair event_msg/token_count with the previous response event.
@@ -80,8 +92,27 @@ export function startCodexAdapter(sink: EventSink): () => void {
             const key = `${usage.input}|${usage.cacheRead}|${usage.output}`;
             if (cursor!.lastUsageKey !== key) {
               cursor!.lastUsageKey = key;
-              sink.enrich(cursor!.lastResponseId, { usage });
+              const model = cursor!.model ?? "gpt-5";
+              const cost = costOf(model, usage);
+              sink.enrich(cursor!.lastResponseId, { usage, cost, model });
             }
+          }
+          // Codex signals compaction via task_started/turn_truncated —
+          // the equivalent of Claude's isCompactSummary.
+          if (isCompactionEvent(obj)) {
+            sink.emit({
+              id: nextId(),
+              ts: clampTs(
+                typeof obj.timestamp === "string"
+                  ? obj.timestamp
+                  : new Date().toISOString(),
+              ),
+              agent: "codex",
+              type: "compaction",
+              sessionId,
+              riskScore: riskOf("compaction"),
+              summary: `[${cursor!.project}] ⋈ context compacted`,
+            });
           }
           return;
         }
@@ -203,6 +234,18 @@ function extractMessageText(payload: Record<string, unknown>): string {
     }
   }
   return parts.join("\n").trim();
+}
+
+/** Codex emits a few compaction-adjacent markers. We treat any of these
+ *  as compaction for timeline purposes: truncation_policy triggered,
+ *  explicit `turn_truncated` event, or a task_started whose truncation
+ *  delta is non-zero (not always present). */
+export function isCompactionEvent(obj: Record<string, unknown>): boolean {
+  const payload = (obj.payload ?? {}) as Record<string, unknown>;
+  const t = payload.type;
+  if (t === "turn_truncated") return true;
+  if (t === "compaction") return true; // future-proof for renamed event
+  return false;
 }
 
 /** Pull the last-turn usage counts out of a Codex event_msg/token_count
