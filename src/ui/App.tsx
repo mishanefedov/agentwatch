@@ -16,6 +16,7 @@ import { attributeTokens } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
+import { detectStuckLoop, scoreEvent, type AnomalyFlag } from "../util/anomaly.js";
 import { searchAllSessions, type SearchHit } from "../util/cross-search.js";
 import { CrossSearchView } from "./CrossSearchView.js";
 import { notify, shouldNotify } from "../util/notifier.js";
@@ -478,6 +479,39 @@ export function App() {
     ? sessionScoped.filter((e) => matchesQuery(e, state.searchQuery))
     : sessionScoped;
 
+  // Anomaly pass — score only the most recent 40 events against their
+  // per-agent history. Anything older is effectively static and
+  // re-scoring it is wasted work.
+  const anomalies = new Map<string, AnomalyFlag[]>();
+  {
+    const sliceEnd = Math.min(40, state.events.length);
+    // Events are newest-first; score the newest batch.
+    for (let i = 0; i < sliceEnd; i++) {
+      const ev = state.events[i]!;
+      const history = state.events
+        .slice(i + 1)
+        .filter((h) => h.agent === ev.agent);
+      if (history.length === 0) continue;
+      const flags = scoreEvent(ev, history);
+      if (flags.length > 0) anomalies.set(ev.id, flags);
+    }
+  }
+  const stuckLoop = detectStuckLoop(state.events.slice(0, 20).reverse());
+  if (stuckLoop) {
+    const first = state.events[0];
+    if (first) {
+      const prev = anomalies.get(first.id) ?? [];
+      anomalies.set(first.id, [
+        ...prev,
+        {
+          kind: "stuck-loop",
+          message: `stuck loop: same tool fired ${stuckLoop.count}× in a row`,
+          magnitude: stuckLoop.count,
+        },
+      ]);
+    }
+  }
+
   const projects = buildProjectIndex(state.events);
   const sessionsForOpen = state.sessionsForProject
     ? buildSessionRows(state.events, state.sessionsForProject)
@@ -779,6 +813,7 @@ export function App() {
         filter={state.filterAgent}
         paused={state.paused}
         budget={computeBudgetStatus(state.events)}
+        anomalies={anomalies}
       />
       <Breadcrumb
         projectFilter={state.projectFilter}
@@ -851,6 +886,7 @@ export function App() {
               events={filtered}
               selectedIdx={state.selectedIdx}
               childCountByAgentId={childCountByAgentId}
+              anomalies={anomalies}
             />
           </Box>
           {state.showAgents && (

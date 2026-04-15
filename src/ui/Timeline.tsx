@@ -1,16 +1,19 @@
 import { Box, Text } from "ink";
 import type { AgentEvent, AgentName } from "../schema.js";
+import type { AnomalyFlag } from "../util/anomaly.js";
 
 interface Props {
   events: AgentEvent[];
   selectedIdx?: number | null;
   childCountByAgentId?: Map<string, number>;
+  anomalies?: Map<string, AnomalyFlag[]>;
 }
 
 export function Timeline({
   events,
   selectedIdx,
   childCountByAgentId,
+  anomalies,
 }: Props) {
   const header = (
     <Box>
@@ -58,6 +61,7 @@ export function Timeline({
               ? (childCountByAgentId?.get(e.details.subAgentId) ?? 0)
               : 0
           }
+          flagged={anomalies?.has(e.id) ?? false}
         />
       ))}
     </Box>
@@ -68,10 +72,12 @@ function EventRow({
   event,
   selected,
   childCount,
+  flagged,
 }: {
   event: AgentEvent;
   selected: boolean;
   childCount: number;
+  flagged: boolean;
 }) {
   const time = event.ts.slice(11, 19);
   const baseLine = event.summary ?? event.path ?? event.cmd ?? event.tool ?? event.type;
@@ -85,7 +91,9 @@ function EventRow({
       <Text wrap="truncate" inverse={selected}>
         <Text dimColor>{time} </Text>
         <Text color={agentColor(event.agent)}>{pad(event.agent, 10)} </Text>
-        <Text color={riskColor(event.riskScore)}>{pad(event.type, 13)} </Text>
+        <Text color={flagged ? "red" : riskColor(event.riskScore)}>
+          {flagged ? "◎" : " "}{pad(event.type, 12)}{" "}
+        </Text>
         <Text>{baseLine}</Text>
         {duration && <Text dimColor>{duration}</Text>}
         {err && <Text color="red">{err}</Text>}
