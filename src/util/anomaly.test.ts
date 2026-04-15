@@ -52,11 +52,26 @@ describe("eventSignature", () => {
 });
 
 describe("detectStuckLoop", () => {
-  it("flags a run of ≥3 identical signatures", () => {
+  it("flags a run of ≥3 identical signatures (period 1)", () => {
     const loop = Array.from({ length: 5 }, () =>
       evt({ tool: "Bash", cmd: "ls" }),
     );
-    expect(detectStuckLoop(loop)?.count).toBeGreaterThanOrEqual(3);
+    const hit = detectStuckLoop(loop);
+    expect(hit?.period).toBe(1);
+    expect(hit?.count).toBeGreaterThanOrEqual(3);
+  });
+
+  it("flags an alternating A-B-A-B-A-B loop (period 2)", () => {
+    const loop = [
+      evt({ tool: "Bash", cmd: "pytest" }),
+      evt({ tool: "Edit", path: "/a.py" }),
+      evt({ tool: "Bash", cmd: "pytest" }),
+      evt({ tool: "Edit", path: "/a.py" }),
+      evt({ tool: "Bash", cmd: "pytest" }),
+      evt({ tool: "Edit", path: "/a.py" }),
+    ];
+    const hit = detectStuckLoop(loop);
+    expect(hit?.period).toBe(2);
   });
 
   it("does not flag distinct events", () => {
