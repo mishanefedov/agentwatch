@@ -12,6 +12,8 @@ import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
 import { exportSession } from "../util/export.js";
 import { restoreTerminal } from "../util/terminal.js";
+import { attributeTokens } from "../util/token-attribution.js";
+import { TokensView } from "./TokensView.js";
 import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
 import { Breadcrumb } from "./Breadcrumb.js";
@@ -86,6 +88,8 @@ type State = {
   /** Transient message shown at the footer for ~2s (e.g. after a yank). */
   flashMessage: string | null;
   showHelp: boolean;
+  /** Token-attribution overlay for the currently scoped session. */
+  showTokens: boolean;
 };
 
 type Action =
@@ -115,6 +119,7 @@ type Action =
   | { type: "flash"; text: string }
   | { type: "flash-clear" }
   | { type: "toggle-help" }
+  | { type: "toggle-tokens" }
   | { type: "home" }
   | { type: "back" }
   | { type: "open-sessions"; project: string }
@@ -276,6 +281,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, flashMessage: null };
     case "toggle-help":
       return { ...state, showHelp: !state.showHelp };
+    case "toggle-tokens":
+      return { ...state, showTokens: !state.showTokens };
     case "home":
       // Reset every view / filter / scope back to the default timeline
       return {
@@ -363,6 +370,7 @@ export function App() {
     sessionFilter: null,
     flashMessage: null,
     showHelp: false,
+    showTokens: false,
   });
 
   useEffect(() => {
@@ -615,6 +623,9 @@ export function App() {
       dispatch({ type: "flash", text: msg });
       setTimeout(() => dispatch({ type: "flash-clear" }), 3000);
     }
+    if (input === "t" && state.sessionFilter) {
+      dispatch({ type: "toggle-tokens" });
+    }
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") {
       dispatch({ type: "set-project-filter", project: null });
@@ -684,6 +695,11 @@ export function App() {
       />
       {state.showHelp ? (
         <HelpView />
+      ) : state.showTokens && state.sessionFilter ? (
+        <TokensView
+          breakdown={attributeTokens(state.events, state.sessionFilter)}
+          sessionId={state.sessionFilter}
+        />
       ) : state.sessionsForProject ? (
         <SessionsView
           project={state.sessionsForProject}
@@ -754,7 +770,7 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export  [Z] clear filters`}
+                : `[?] help  [q] quit  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens" : ""}  [Z] clear filters`}
         </Text>
       </Box>
     </Box>
