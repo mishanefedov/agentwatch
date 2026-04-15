@@ -21,7 +21,7 @@ const CATEGORIES: {
   color: string;
 }[] = [
   { key: "user", label: "user", color: "gray" },
-  { key: "claudeMd", label: "CLAUDE.md", color: "magenta" },
+  { key: "memoryFile", label: "memory file", color: "magenta" },
   { key: "toolIO", label: "tool I/O", color: "white" },
   { key: "thinking", label: "thinking", color: "blue" },
   { key: "input", label: "input (fresh)", color: "cyan" },
@@ -37,7 +37,12 @@ export function TokensView({
   selectedIdx,
   viewportRows,
 }: Props) {
-  const total = totalTokens(breakdown) + breakdown.thinking + breakdown.toolIO + breakdown.user + breakdown.claudeMd;
+  const total =
+    totalTokens(breakdown) +
+    breakdown.thinking +
+    breakdown.toolIO +
+    breakdown.user +
+    breakdown.memoryFile;
   const aggregateRows = CATEGORIES.map((c) => {
     const key = c.key as keyof TokenBreakdown;
     const val = (breakdown[key] as number) ?? 0;
@@ -48,6 +53,9 @@ export function TokensView({
   const maxTurnTotal = Math.max(
     1,
     ...turns.map((t) => turnTotal(t)),
+  );
+  const hasUsageData = turns.some(
+    (t) => t.input + t.cacheRead + t.cacheCreate + t.output > 0,
   );
 
   const visibleTurns = turns.slice(
@@ -68,6 +76,14 @@ export function TokensView({
       <Text dimColor>[↑↓] select turn  [t] close  [esc] back</Text>
       <Box flexDirection="column" marginTop={1}>
         <Text bold dimColor>Aggregate (session total)</Text>
+        {!hasUsageData && turns.length > 0 && (
+          <Text color="yellow">
+            ⚠ no token-usage data captured for this agent yet — budget,
+            cost, and usage columns will show 0. Only user / memory
+            file / thinking / tool I/O are tokenizer-measured from event
+            content.
+          </Text>
+        )}
         {aggregateRows.map((r) => (
           <AggregateRow key={r.label} row={r} total={total} />
         ))}
@@ -167,7 +183,7 @@ function TurnRow({
 function turnTotal(t: TurnBreakdown): number {
   return (
     t.user +
-    t.claudeMd +
+    t.memoryFile +
     t.toolIO +
     t.thinking +
     t.input +

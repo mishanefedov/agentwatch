@@ -25,7 +25,7 @@ import type { AgentEvent } from "../schema.js";
  */
 
 interface SessionRef {
-  agent: "claude-code" | "codex";
+  agent: "claude-code" | "codex" | "gemini";
   sessionId: string;
   project: string;
   path: string;
@@ -282,6 +282,14 @@ function parseSession(s: SessionRef): AgentEvent[] {
   } catch {
     return [];
   }
+  if (s.agent === "gemini") {
+    // Gemini sessions are single-JSON not JSONL, and we don't yet
+    // translate them to AgentEvents for stats purposes. Return empty
+    // so get_tool_usage_stats / get_session_cost produce honest zeroes
+    // rather than fake data. Raw content still reachable via
+    // get_session_events.
+    return [];
+  }
   const out: AgentEvent[] = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -332,8 +340,52 @@ function listAllSessions(): SessionRef[] {
   } catch {
     /* no codex */
   }
+  try {
+    const gdir = join(process.env.HOME ?? "", ".gemini", "tmp");
+    walkGemini(gdir, out);
+  } catch {
+    /* no gemini */
+  }
   out.sort((a, b) => b.lastActivity - a.lastActivity);
   return out;
+}
+
+function walkGemini(dir: string, out: SessionRef[]): void {
+  let projects: string[];
+  try {
+    projects = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const project of projects) {
+    const chatsDir = join(dir, project, "chats");
+    let files: string[];
+    try {
+      files = readdirSync(chatsDir);
+    } catch {
+      continue;
+    }
+    for (const name of files) {
+      if (!name.endsWith(".json")) continue;
+      const full = join(chatsDir, name);
+      let st;
+      try {
+        st = statSync(full);
+      } catch {
+        continue;
+      }
+      const base = name.replace(/\.json$/, "");
+      const m = base.match(/^session-[0-9T:\-]+-(.+)$/);
+      out.push({
+        agent: "gemini",
+        sessionId: m?.[1] ?? base,
+        project,
+        path: full,
+        lastActivity: st.mtimeMs,
+        sizeBytes: st.size,
+      });
+    }
+  }
 }
 
 function walkCodex(dir: string, out: SessionRef[]): void {

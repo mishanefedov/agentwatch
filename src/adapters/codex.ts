@@ -16,6 +16,12 @@ export function codexSessionsDir(home: string = os.homedir()): string {
 interface Cursor {
   offset: number;
   project: string;
+  /** Event id of the most recently emitted assistant response, so we
+   *  can attach a later token_count event's usage data to it. */
+  lastResponseId?: string;
+  /** Usage last attributed to this cursor — used to de-dupe repeated
+   *  token_count events that carry the same last_token_usage. */
+  lastUsageKey?: string;
 }
 
 export function startCodexAdapter(sink: EventSink): () => void {
@@ -67,8 +73,23 @@ export function startCodexAdapter(sink: EventSink): () => void {
           if (typeof cwd === "string") cursor!.project = projectOf(cwd);
           return;
         }
+        // Pair event_msg/token_count with the previous response event.
+        if (obj.type === "event_msg") {
+          const usage = extractTokenUsage(obj);
+          if (usage && cursor!.lastResponseId) {
+            const key = `${usage.input}|${usage.cacheRead}|${usage.output}`;
+            if (cursor!.lastUsageKey !== key) {
+              cursor!.lastUsageKey = key;
+              sink.enrich(cursor!.lastResponseId, { usage });
+            }
+          }
+          return;
+        }
         const event = translate(obj, sessionId, cursor!.project);
-        if (event) sink.emit(event);
+        if (event) {
+          sink.emit(event);
+          if (event.type === "response") cursor!.lastResponseId = event.id;
+        }
       } catch {
         /* malformed line */
       }
@@ -182,6 +203,33 @@ function extractMessageText(payload: Record<string, unknown>): string {
     }
   }
   return parts.join("\n").trim();
+}
+
+/** Pull the last-turn usage counts out of a Codex event_msg/token_count
+ *  event. Codex schema (2026-04-15): payload.info.last_token_usage has
+ *  input_tokens / cached_input_tokens / output_tokens / reasoning_output_tokens.
+ *  Returns null for the periodic rate-limit-only events where info is null. */
+export function extractTokenUsage(obj: Record<string, unknown>): {
+  input: number;
+  cacheRead: number;
+  cacheCreate: number;
+  output: number;
+} | null {
+  const payload = (obj.payload ?? {}) as Record<string, unknown>;
+  if (payload.type !== "token_count") return null;
+  const info = payload.info;
+  if (!info || typeof info !== "object") return null;
+  const last = (info as Record<string, unknown>).last_token_usage as
+    | Record<string, unknown>
+    | undefined;
+  if (!last) return null;
+  const n = (v: unknown): number => (typeof v === "number" ? v : 0);
+  return {
+    input: n(last.input_tokens),
+    cacheRead: n(last.cached_input_tokens),
+    cacheCreate: 0,
+    output: n(last.output_tokens) + n(last.reasoning_output_tokens),
+  };
 }
 
 function safeJson(s: string): Record<string, unknown> | null {

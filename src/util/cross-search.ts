@@ -39,6 +39,8 @@ function sessionRoots(home: string): string[] {
   if (fs.existsSync(claude)) out.push(claude);
   const codex = path.join(home, ".codex", "sessions");
   if (fs.existsSync(codex)) out.push(codex);
+  const gemini = path.join(home, ".gemini", "tmp");
+  if (fs.existsSync(gemini)) out.push(gemini);
   return out;
 }
 
@@ -62,7 +64,7 @@ function searchWithRipgrep(
     "--no-heading",
     "--line-number",
     "--glob",
-    "*.jsonl",
+    "*.{jsonl,json}",
     query,
     ...roots,
   ];
@@ -90,7 +92,7 @@ function searchNative(
   for (const root of roots) {
     for (const file of walk(root)) {
       if (hits.length >= limit) return hits;
-      if (!file.endsWith(".jsonl")) continue;
+      if (!file.endsWith(".jsonl") && !file.endsWith(".json")) continue;
       try {
         const lines = fs.readFileSync(file, "utf8").split("\n");
         for (let i = 0; i < lines.length && hits.length < limit; i++) {
@@ -129,6 +131,7 @@ function hitFromPath(
   const trimmed = line.length > MAX_LINE ? line.slice(0, MAX_LINE) + "…" : line;
   const isClaude = file.includes(path.sep + ".claude" + path.sep + "projects");
   const isCodex = file.includes(path.sep + ".codex" + path.sep + "sessions");
+  const isGemini = file.includes(path.sep + ".gemini" + path.sep + "tmp");
   if (isClaude) {
     const parts = file.split(path.sep);
     const projIdx = parts.lastIndexOf("projects");
@@ -150,6 +153,22 @@ function hitFromPath(
       agent: "codex",
       sessionId: m?.[1] ?? path.basename(file, ".jsonl"),
       project: "",
+      path: file,
+      lineNumber,
+      line: trimmed,
+    };
+  }
+  if (isGemini) {
+    // …/.gemini/tmp/<project>/chats/session-YYYY-MM-DDTHH-MM-<hash>.json
+    const parts = file.split(path.sep);
+    const tmpIdx = parts.lastIndexOf("tmp");
+    const project = parts[tmpIdx + 1] ?? "";
+    const base = path.basename(file, ".json");
+    const m = base.match(/^session-[0-9T:\-]+-(.+)$/);
+    return {
+      agent: "gemini",
+      sessionId: m?.[1] ?? base,
+      project,
       path: file,
       lineNumber,
       line: trimmed,
