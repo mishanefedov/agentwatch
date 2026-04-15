@@ -104,54 +104,63 @@ function normalizeCmd(cmd: string): string {
     .slice(0, 120);
 }
 
-/** Return the repeated trigram if the last `loopWindow` events contain
- *  ≥ `loopMinRepeats` consecutive occurrences of the same 3-event pattern.
- *  Returns null when no loop is detected. */
+/** Stuck-loop detector. Returns the pattern string and its repeat count
+ *  when the last `loopWindow` events contain either:
+ *
+ *  - ≥ `loopMinRepeats` consecutive identical signatures (A-A-A-…), or
+ *  - ≥ `loopMinRepeats` repeats of a period-p cycle for p ∈ {2,3,4}
+ *    (A-B-A-B-A-B, A-B-C-A-B-C, …).
+ *
+ *  Alternating loops (p>1) are how agents fail most often in practice —
+ *  "try X → fail → apologize → try X → fail" is a 2-cycle, not a
+ *  consecutive repeat. */
 export function detectStuckLoop(
   events: AgentEvent[],
   thresholds: AnomalyThresholds = loadThresholds(),
-): { trigram: string; count: number } | null {
+): { pattern: string; count: number; period: number } | null {
   const window = events.slice(-thresholds.loopWindow);
-  if (window.length < 3) return null;
+  if (window.length < thresholds.loopMinRepeats) return null;
   const sigs = window.map(eventSignature);
-  // Slide trigrams; track the longest run of identical trigrams.
-  let bestRun = 0;
-  let bestStart = 0;
+
+  // p = 1: consecutive identical signatures.
+  let best: { pattern: string; count: number; period: number } | null = null;
   let run = 1;
-  for (let i = 1; i + 2 < sigs.length; i++) {
-    if (sigs[i] === sigs[i - 1] && sigs[i + 1] === sigs[i] && sigs[i + 2] === sigs[i + 1]) {
+  for (let i = 1; i < sigs.length; i++) {
+    if (sigs[i] === sigs[i - 1]) {
       run += 1;
-      if (run > bestRun) {
-        bestRun = run;
-        bestStart = i - run;
+      if (run >= thresholds.loopMinRepeats) {
+        if (!best || run > best.count) {
+          best = { pattern: sigs[i]!, count: run, period: 1 };
+        }
       }
     } else {
       run = 1;
     }
   }
-  // Simpler: count consecutive identical signatures, which is what agent
-  // loops usually look like (same tool+args fired over and over).
-  let consecutive = 1;
-  let maxConsec = 1;
-  let maxSig = sigs[0]!;
-  for (let i = 1; i < sigs.length; i++) {
-    if (sigs[i] === sigs[i - 1]) {
-      consecutive += 1;
-      if (consecutive > maxConsec) {
-        maxConsec = consecutive;
-        maxSig = sigs[i]!;
+
+  // p ∈ {2,3,4}: sliding period check. For each period, count how many
+  // consecutive positions satisfy sigs[i] === sigs[i-p], then divide by
+  // p to count "full cycles".
+  for (let p = 2; p <= 4; p++) {
+    if (sigs.length < p * thresholds.loopMinRepeats) continue;
+    let consecutive = 0;
+    for (let i = p; i < sigs.length; i++) {
+      if (sigs[i] === sigs[i - p]) {
+        consecutive += 1;
+        const cycles = Math.floor(consecutive / p) + 1;
+        if (cycles >= thresholds.loopMinRepeats) {
+          const patternSigs = sigs.slice(i - consecutive, i - consecutive + p);
+          const pattern = patternSigs.join(" → ");
+          if (!best || cycles > best.count) {
+            best = { pattern, count: cycles, period: p };
+          }
+        }
+      } else {
+        consecutive = 0;
       }
-    } else {
-      consecutive = 1;
     }
   }
-  if (maxConsec >= thresholds.loopMinRepeats) {
-    return { trigram: maxSig, count: maxConsec };
-  }
-  // Suppress unused bestStart warning while keeping the trigram scaffold
-  // in place for a future sliding-pattern implementation.
-  void bestStart;
-  return null;
+  return best;
 }
 
 /* ---------- Event-level anomaly scoring ---------- */
@@ -164,6 +173,48 @@ export interface AnomalyFlag {
   message: string;
   /** |z| (for metric outliers) or repeat count (for loops). */
   magnitude: number;
+  /** Session this flag is attached to (for per-session aggregation). */
+  sessionId?: string;
+}
+
+export interface SessionAnomalySummary {
+  sessionId: string;
+  /** Counts per anomaly kind. */
+  counts: Record<AnomalyKind, number>;
+  /** Highest magnitude seen (max |z| or longest loop). */
+  worstMagnitude: number;
+  /** First-flag message to show in UI. */
+  headline: string;
+}
+
+/** Aggregate per-event flags into one summary row per session. */
+export function summarizeBySession(
+  perEvent: Map<string, AnomalyFlag[]>,
+): SessionAnomalySummary[] {
+  const bySession = new Map<string, SessionAnomalySummary>();
+  for (const flags of perEvent.values()) {
+    for (const f of flags) {
+      const sid = f.sessionId ?? "(unknown)";
+      let row = bySession.get(sid);
+      if (!row) {
+        row = {
+          sessionId: sid,
+          counts: { cost: 0, duration: 0, tokens: 0, "stuck-loop": 0 },
+          worstMagnitude: 0,
+          headline: f.message,
+        };
+        bySession.set(sid, row);
+      }
+      row.counts[f.kind] += 1;
+      if (f.magnitude > row.worstMagnitude) {
+        row.worstMagnitude = f.magnitude;
+        row.headline = f.message;
+      }
+    }
+  }
+  return Array.from(bySession.values()).sort(
+    (a, b) => b.worstMagnitude - a.worstMagnitude,
+  );
 }
 
 /** Given an incoming event plus the history it should be scored against,
@@ -186,6 +237,7 @@ export function scoreEvent(
         kind: "cost",
         message: `cost ${z.toFixed(1)}× normal ($${event.details.cost.toFixed(4)})`,
         magnitude: z,
+        sessionId: event.sessionId,
       });
     }
   }
@@ -201,6 +253,7 @@ export function scoreEvent(
         kind: "duration",
         message: `duration ${z.toFixed(1)}× normal (${event.details.durationMs}ms)`,
         magnitude: z,
+        sessionId: event.sessionId,
       });
     }
   }
@@ -218,6 +271,7 @@ export function scoreEvent(
         kind: "tokens",
         message: `tokens ${z.toFixed(1)}× normal (${total.toLocaleString()})`,
         magnitude: z,
+        sessionId: event.sessionId,
       });
     }
   }

@@ -16,7 +16,12 @@ import { attributeTokens } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
-import { detectStuckLoop, scoreEvent, type AnomalyFlag } from "../util/anomaly.js";
+import {
+  detectStuckLoop,
+  scoreEvent,
+  summarizeBySession,
+  type AnomalyFlag,
+} from "../util/anomaly.js";
 import { searchAllSessions, type SearchHit } from "../util/cross-search.js";
 import { CrossSearchView } from "./CrossSearchView.js";
 import { notify, shouldNotify } from "../util/notifier.js";
@@ -101,6 +106,12 @@ type State = {
   crossSearchTyping: boolean;
   crossSearchResults: SearchHit[];
   crossSearchIdx: number;
+  /** Anomaly banner dismissal — keyed by a signature of current anomalies
+   *  so re-flagging a different anomaly reopens the banner. */
+  anomalyDismissKey: string | null;
+  /** Event IDs we have already fired desktop notifications for (per
+   *  process lifetime). */
+  anomalyNotified: Set<string>;
 };
 
 type Action =
@@ -137,6 +148,8 @@ type Action =
   | { type: "cross-backspace" }
   | { type: "cross-submit"; hits: SearchHit[] }
   | { type: "cross-move"; delta: number }
+  | { type: "anomaly-dismiss"; key: string }
+  | { type: "anomaly-mark-notified"; ids: string[] }
   | { type: "home" }
   | { type: "back" }
   | { type: "open-sessions"; project: string }
@@ -339,6 +352,13 @@ function reducer(state: State, action: Action): State {
       );
       return { ...state, crossSearchIdx: next };
     }
+    case "anomaly-dismiss":
+      return { ...state, anomalyDismissKey: action.key };
+    case "anomaly-mark-notified": {
+      const next = new Set(state.anomalyNotified);
+      for (const id of action.ids) next.add(id);
+      return { ...state, anomalyNotified: next };
+    }
     case "home":
       // Reset every view / filter / scope back to the default timeline
       return {
@@ -432,6 +452,8 @@ export function App() {
     crossSearchTyping: false,
     crossSearchResults: [],
     crossSearchIdx: 0,
+    anomalyDismissKey: null,
+    anomalyNotified: new Set<string>(),
   });
 
   useEffect(() => {
@@ -501,16 +523,45 @@ export function App() {
     const first = state.events[0];
     if (first) {
       const prev = anomalies.get(first.id) ?? [];
+      const label =
+        stuckLoop.period === 1
+          ? `same tool fired ${stuckLoop.count}× in a row`
+          : `period-${stuckLoop.period} loop (${stuckLoop.count} cycles): ${stuckLoop.pattern}`;
       anomalies.set(first.id, [
         ...prev,
         {
           kind: "stuck-loop",
-          message: `stuck loop: same tool fired ${stuckLoop.count}× in a row`,
+          message: `stuck loop: ${label}`,
           magnitude: stuckLoop.count,
+          sessionId: first.sessionId,
         },
       ]);
     }
   }
+
+  // Aggregate per session + fire OS notifications for new anomalies.
+  const sessionSummaries = summarizeBySession(anomalies);
+  const anomalyKey = sessionSummaries
+    .map((s) => `${s.sessionId}:${s.headline}`)
+    .join("|");
+  const bannerSuppressed = state.anomalyDismissKey === anomalyKey;
+  useEffect(() => {
+    const toNotify: string[] = [];
+    for (const [id, flags] of anomalies) {
+      if (state.anomalyNotified.has(id)) continue;
+      for (const f of flags) {
+        notify(
+          `⚠ agentwatch anomaly`,
+          `${f.kind}: ${f.message}`,
+        );
+        toNotify.push(id);
+        break;
+      }
+    }
+    if (toNotify.length > 0) {
+      dispatch({ type: "anomaly-mark-notified", ids: toNotify });
+    }
+  }, [anomalyKey]);
 
   const projects = buildProjectIndex(state.events);
   const sessionsForOpen = state.sessionsForProject
@@ -725,6 +776,9 @@ export function App() {
     }
     if (input === "/") dispatch({ type: "open-search" });
     if (input === "?") dispatch({ type: "cross-open" });
+    if (input === "D" && anomalyKey) {
+      dispatch({ type: "anomaly-dismiss", key: anomalyKey });
+    }
     if (input === "x" && state.selectedIdx !== null) {
       const ev = filtered[state.selectedIdx];
       const sid = ev?.details?.subAgentId;
@@ -813,7 +867,8 @@ export function App() {
         filter={state.filterAgent}
         paused={state.paused}
         budget={computeBudgetStatus(state.events)}
-        anomalies={anomalies}
+        anomalies={bannerSuppressed ? undefined : anomalies}
+        sessionAnomalies={bannerSuppressed ? [] : sessionSummaries}
       />
       <Breadcrumb
         projectFilter={state.projectFilter}

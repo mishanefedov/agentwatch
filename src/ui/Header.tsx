@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 import type { AgentName } from "../schema.js";
 import type { BudgetStatus } from "../util/budgets.js";
-import type { AnomalyFlag } from "../util/anomaly.js";
+import type { AnomalyFlag, SessionAnomalySummary } from "../util/anomaly.js";
 import { formatUSD } from "../util/cost.js";
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
   paused: boolean;
   budget?: BudgetStatus;
   anomalies?: Map<string, AnomalyFlag[]>;
+  sessionAnomalies?: SessionAnomalySummary[];
 }
 
 export type { Props as HeaderProps };
@@ -22,9 +23,11 @@ export function Header({
   paused,
   budget,
   anomalies,
+  sessionAnomalies,
 }: Props) {
   const breached = budget?.breachedSession || budget?.dayBreach;
   const anomalyMessages = summarizeAnomalies(anomalies);
+  const sessionRows = (sessionAnomalies ?? []).slice(0, 2);
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box flexDirection="row" justifyContent="space-between">
@@ -76,11 +79,25 @@ export function Header({
           )}
         </Box>
       )}
-      {anomalyMessages.map((msg) => (
-        <Text key={msg} color="red">
-          ⚠ anomaly: <Text bold>{msg}</Text>
-        </Text>
-      ))}
+      {sessionRows.map((s) => {
+        const total =
+          s.counts.cost + s.counts.duration + s.counts.tokens + s.counts["stuck-loop"];
+        return (
+          <Text key={s.sessionId} color="red">
+            ⚠ session {s.sessionId.slice(0, 8)} · {total} flag
+            {total === 1 ? "" : "s"} · {s.headline}
+          </Text>
+        );
+      })}
+      {sessionRows.length === 0 &&
+        anomalyMessages.map((msg) => (
+          <Text key={msg} color="red">
+            ⚠ anomaly: <Text bold>{msg}</Text>
+          </Text>
+        ))}
+      {(sessionRows.length > 0 || anomalyMessages.length > 0) && (
+        <Text dimColor>[D] dismiss banner until the next anomaly</Text>
+      )}
     </Box>
   );
 }
