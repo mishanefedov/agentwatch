@@ -24,8 +24,16 @@ import {
   summarizeBySession,
   type AnomalyFlag,
 } from "../util/anomaly.js";
-import { searchAllSessions, type SearchHit } from "../util/cross-search.js";
-import { CrossSearchView } from "./CrossSearchView.js";
+import { searchAllSessions } from "../util/cross-search.js";
+import { CrossSearchView, type UnifiedHit } from "./CrossSearchView.js";
+import {
+  hasIndex,
+  indexStats,
+  loadEmbedder,
+  searchBm25Only,
+  searchHybrid,
+} from "../util/semantic-index.js";
+import { buildSemanticIndex } from "../util/semantic-builder.js";
 import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
 import { Breadcrumb } from "./Breadcrumb.js";
@@ -113,8 +121,10 @@ type State = {
   crossSearchOpen: boolean;
   crossSearchQuery: string;
   crossSearchTyping: boolean;
-  crossSearchResults: SearchHit[];
+  crossSearchResults: UnifiedHit[];
   crossSearchIdx: number;
+  crossSearchMode: "bm25" | "semantic";
+  crossSearchIndexStatus: string | null;
   /** Anomaly banner dismissal — keyed by a signature of current anomalies
    *  so re-flagging a different anomaly reopens the banner. */
   anomalyDismissKey: string | null;
@@ -158,7 +168,9 @@ type Action =
   | { type: "cross-close" }
   | { type: "cross-type"; char: string }
   | { type: "cross-backspace" }
-  | { type: "cross-submit"; hits: SearchHit[] }
+  | { type: "cross-submit"; hits: UnifiedHit[] }
+  | { type: "cross-mode"; mode: "bm25" | "semantic" }
+  | { type: "cross-index-status"; status: string | null }
   | { type: "cross-move"; delta: number }
   | { type: "anomaly-dismiss"; key: string }
   | { type: "anomaly-mark-notified"; ids: string[] }
@@ -355,6 +367,7 @@ function reducer(state: State, action: Action): State {
         crossSearchQuery: "",
         crossSearchResults: [],
         crossSearchIdx: 0,
+        crossSearchIndexStatus: null,
       };
     case "cross-close":
       return {
@@ -363,7 +376,12 @@ function reducer(state: State, action: Action): State {
         crossSearchTyping: false,
         crossSearchQuery: "",
         crossSearchResults: [],
+        crossSearchIndexStatus: null,
       };
+    case "cross-mode":
+      return { ...state, crossSearchMode: action.mode };
+    case "cross-index-status":
+      return { ...state, crossSearchIndexStatus: action.status };
     case "cross-type":
       return { ...state, crossSearchQuery: state.crossSearchQuery + action.char };
     case "cross-backspace":
@@ -488,6 +506,8 @@ export function App() {
     crossSearchTyping: false,
     crossSearchResults: [],
     crossSearchIdx: 0,
+    crossSearchMode: "bm25",
+    crossSearchIndexStatus: null,
     anomalyDismissKey: null,
     anomalyNotified: new Set<string>(),
     showCompaction: false,
@@ -669,18 +689,39 @@ export function App() {
       }
       if (state.crossSearchTyping) {
         if (key.return) {
-          const hits = searchAllSessions(state.crossSearchQuery, 100);
-          dispatch({ type: "cross-submit", hits });
+          const q = state.crossSearchQuery;
+          if (state.crossSearchMode === "bm25") {
+            const hits = searchAllSessions(q, 100).map(
+              (h): UnifiedHit => ({ kind: "bm25", hit: h }),
+            );
+            dispatch({ type: "cross-submit", hits });
+          } else {
+            void runSemanticSearch(q, dispatch);
+          }
           return;
         }
         if (key.backspace || key.delete) {
           dispatch({ type: "cross-backspace" });
           return;
         }
+        if (input === "s" && state.crossSearchQuery === "") {
+          dispatch({
+            type: "cross-mode",
+            mode: state.crossSearchMode === "bm25" ? "semantic" : "bm25",
+          });
+          return;
+        }
         if (input && !key.ctrl && !key.meta) {
           dispatch({ type: "cross-type", char: input });
           return;
         }
+        return;
+      }
+      if (input === "s") {
+        dispatch({
+          type: "cross-mode",
+          mode: state.crossSearchMode === "bm25" ? "semantic" : "bm25",
+        });
         return;
       }
       if (key.downArrow || input === "j") {
@@ -694,11 +735,9 @@ export function App() {
       if (key.return) {
         const hit = state.crossSearchResults[state.crossSearchIdx];
         if (hit) {
+          const sid = hit.kind === "bm25" ? hit.hit.sessionId : hit.hit.sessionId;
           dispatch({ type: "cross-close" });
-          dispatch({
-            type: "sessions-open-selected",
-            sessionId: hit.sessionId,
-          });
+          dispatch({ type: "sessions-open-selected", sessionId: sid });
         }
         return;
       }
@@ -992,6 +1031,8 @@ export function App() {
           hits={state.crossSearchResults}
           selectedIdx={state.crossSearchIdx}
           viewportRows={Math.max(3, rows - 8)}
+          mode={state.crossSearchMode}
+          indexingStatus={state.crossSearchIndexStatus}
         />
       ) : state.showCompaction && state.sessionFilter ? (
         <CompactionView
@@ -1086,4 +1127,49 @@ export function App() {
       </Box>
     </Box>
   );
+}
+
+/** Kick off a semantic search. Ensures the index exists (builds if
+ *  missing), embeds the query, fuses BM25 + vector hits with RRF, and
+ *  dispatches the result to the cross-search view. Falls back to
+ *  BM25-only if the embedder fails to load. */
+async function runSemanticSearch(
+  query: string,
+  dispatch: React.Dispatch<Action>,
+): Promise<void> {
+  try {
+    if (!hasIndex() || indexStats().vectors === 0) {
+      dispatch({
+        type: "cross-index-status",
+        status: "Building semantic index (first-run model download ~80MB)…",
+      });
+      await buildSemanticIndex({
+        onProgress: (p) => {
+          dispatch({
+            type: "cross-index-status",
+            status: `Indexed ${p.embeddedTurns}/${p.queuedTurns} turns across ${p.scannedFiles} files`,
+          });
+        },
+      });
+      dispatch({ type: "cross-index-status", status: "Embedding query…" });
+    }
+    const embed = await loadEmbedder();
+    const qvec = await embed(query);
+    const hits = await searchHybrid(query, new Float32Array(qvec), 50);
+    dispatch({
+      type: "cross-submit",
+      hits: hits.map((h) => ({ kind: "semantic" as const, hit: h })),
+    });
+    dispatch({ type: "cross-index-status", status: null });
+  } catch (err) {
+    dispatch({
+      type: "cross-index-status",
+      status: `Semantic search unavailable (${String(err).slice(0, 120)}) — falling back to BM25`,
+    });
+    const hits = searchBm25Only(query, 50);
+    dispatch({
+      type: "cross-submit",
+      hits: hits.map((h) => ({ kind: "semantic" as const, hit: h })),
+    });
+  }
 }
