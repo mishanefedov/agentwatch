@@ -10,6 +10,7 @@ import { ProjectsView } from "./ProjectsView.js";
 import { SessionsView, sessionLineCount } from "./SessionsView.js";
 import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
+import { exportSession } from "../util/export.js";
 import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
 import { Breadcrumb } from "./Breadcrumb.js";
@@ -493,6 +494,22 @@ export function App() {
         dispatch({ type: "back" });
         return;
       }
+      if (input === "e") {
+        const s = sessionsForOpen[state.sessionsSelectedIdx];
+        if (s) {
+          const sessionEvents = state.events.filter(
+            (e) => e.sessionId === s.sessionId,
+          );
+          const res = exportSession(sessionEvents, s.sessionId, s.agent);
+          const copy = copyToClipboard(res.mdPath);
+          const msg = copy.ok
+            ? `✓ exported → ${res.mdPath} (path copied)`
+            : `✓ exported → ${res.mdPath}`;
+          dispatch({ type: "flash", text: msg });
+          setTimeout(() => dispatch({ type: "flash-clear" }), 3000);
+        }
+        return;
+      }
       if (key.downArrow || input === "j") {
         dispatch({
           type: "sessions-move",
@@ -581,6 +598,19 @@ export function App() {
           setTimeout(() => dispatch({ type: "flash-clear" }), 2000);
         }
       }
+    }
+    if (input === "e" && state.sessionFilter) {
+      const sessionEvents = state.events.filter(
+        (ev) => ev.sessionId === state.sessionFilter,
+      );
+      const agent = sessionEvents[0]?.agent ?? "unknown";
+      const res = exportSession(sessionEvents, state.sessionFilter, agent);
+      const copy = copyToClipboard(res.mdPath);
+      const msg = copy.ok
+        ? `✓ exported → ${res.mdPath} (path copied)`
+        : `✓ exported → ${res.mdPath}`;
+      dispatch({ type: "flash", text: msg });
+      setTimeout(() => dispatch({ type: "flash-clear" }), 3000);
     }
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") {
@@ -716,12 +746,12 @@ export function App() {
           {state.searchOpen
             ? "[type to search]  [enter] confirm  [esc] clear"
             : state.sessionsForProject
-              ? "[↑↓] select session  [enter] open  [esc] back to projects"
+              ? "[↑↓] select  [enter] open  [e] export  [esc] back"
               : state.projectsOpen
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [Z] clear filters`}
+                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export  [Z] clear filters`}
         </Text>
       </Box>
     </Box>
