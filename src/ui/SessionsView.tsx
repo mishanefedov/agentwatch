@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import type { SessionRow } from "../util/project-index.js";
-import { agoFromNow, dateBucket } from "../util/project-index.js";
+import { agoFromNow, dateBucket, isStale } from "../util/project-index.js";
 import { formatUSD } from "../util/cost.js";
 import type { AgentName } from "../schema.js";
 
@@ -75,20 +75,22 @@ function LineView({ line, selectedIdx }: { line: Line; selectedIdx: number }) {
   const r = line.row;
   const selected = line.absIdx === selectedIdx;
   const agentTag = tagFor(r.agent, r.subAgent);
+  const stale = isStale(r.lastTs);
   return (
     <Box>
-      <Text wrap="truncate" inverse={selected}>
+      <Text wrap="truncate" inverse={selected} dimColor={stale}>
         <Text color="yellow">{selected ? "▶ " : "  "}</Text>
-        <Text color={colorForAgent(r.agent)}>{pad(agentTag, 22)}</Text>
+        <Text color={stale ? undefined : colorForAgent(r.agent)}>{pad(agentTag, 22)}</Text>
         <Text> {truncate(r.firstPrompt || "(no user prompt yet)", 56)}</Text>
         <Text dimColor> · {r.events}ev · {agoFromNow(r.lastTs)}</Text>
         {r.cost > 0 && (
           <Text dimColor>
             {" · "}
-            <Text color="yellow">{formatUSD(r.cost)}</Text>
+            <Text color={stale ? undefined : "yellow"}>{formatUSD(r.cost)}</Text>
           </Text>
         )}
         {r.hasError && <Text color="red"> · ERR</Text>}
+        {stale && <Text dimColor> · ⊘ stale</Text>}
       </Text>
     </Box>
   );
