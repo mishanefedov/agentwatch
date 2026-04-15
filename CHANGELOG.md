@@ -10,6 +10,78 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+## [0.0.3] — 2026-04-15
+
+### Added — full multi-agent + moats wave
+
+- **M5 parity-with-claude-devtools** — token attribution per turn
+  (gpt-tokenizer cl100k_base; CLAUDE.md / AGENTS.md / GEMINI.md /
+  .cursorrules / .windsurfrules / OPENCLAW.md as memory-file overhead),
+  context compaction visualizer (`C`), syntax highlighting in detail
+  pane (`cli-highlight`), session export to markdown + JSON (`e`),
+  stale-session detection (`⊘ stale` after 5 min idle).
+- **M6 differentiation moats** — user-defined regex / threshold
+  notification triggers in `~/.agentwatch/triggers.json` (live-reloaded),
+  per-session and per-day budget alarms in `~/.agentwatch/budgets.json`
+  (banner + OS notification on breach), MCP server mode (`agentwatch mcp`)
+  exposing 5 tools (`list_recent_sessions`, `get_session_events`,
+  `search_sessions`, `get_tool_usage_stats`, `get_session_cost`),
+  OpenTelemetry exporter (`AGENTWATCH_OTLP_ENDPOINT`) with `gen_ai.*`
+  semantic conventions, cross-session search across every JSONL/JSON
+  on disk.
+- **M7 anomaly detection + semantic search** — MAD z-score outliers
+  on cost / duration / tokens (configurable in
+  `~/.agentwatch/anomaly.json`), period-1-to-4 stuck-loop detector,
+  per-session aggregation with banner + dismiss (`D`) + timeline `◎`
+  marker. Hybrid semantic search (`?` then `s`) using
+  `bge-small-en-v1.5` (q8) via `@huggingface/transformers` v3 + SQLite
+  FTS5 + Reciprocal Rank Fusion. First-run consent prompt before any
+  download.
+- **Codex adapter** — full session parsing including
+  `function_call` / `function_call_output` pairing (toolResult,
+  duration, error flag), `event_msg/token_count` enrichment, model
+  capture from `session_meta` + `turn_context`, GPT-5 / GPT-5-mini
+  cost rates.
+- **Gemini adapter** — full token usage from each `gemini` message,
+  `toolCalls[]` parsing into file_read / file_write / shell_exec /
+  tool_call with inline functionResponse output, gemini-2.5-pro / flash
+  cost rates.
+- **OpenClaw adapter** — surfaces the precomputed `usage` + `cost`
+  block from each assistant message (cacheWrite → cacheCreate map).
+- **Codex + Gemini permission views** — `~/.codex/config.toml` projects
+  + sandbox_policy from latest session's `turn_context`,
+  `~/.gemini/settings.json` auth + tools allow/block + trusted folders.
+
+### Changed
+- README rewritten end-to-end to match shipped reality.
+- Per-event cost / OTel spans now use the `gen_ai.*` OpenTelemetry
+  semantic conventions instead of agentwatch-only attribute names.
+- Codex / Gemini / OpenClaw memory files (AGENTS.md, GEMINI.md,
+  .cursorrules, OPENCLAW.md) are read for token-attribution overhead
+  alongside the existing CLAUDE.md.
+
+### Performance
+- Event dispatches coalesced at 16 ms during backfill — 500 emits
+  collapse to 1 batched merge, removing render thrash on launch.
+- All derived passes (anomaly, budget, projectIndex, sessionRows,
+  childCountByAgentId) wrapped in `useMemo` — no longer recomputed
+  on every keypress.
+- Anomaly scoring now precomputes per-agent histories once instead of
+  `slice + filter` per event.
+
+### Behavior
+- The generic file-system watcher of `WORKSPACE_ROOT` is now opt-in
+  via `AGENTWATCH_WATCH_WORKSPACE=1`. On large monorepos it could
+  exhaust inotify / take seconds to establish watches. Agent events
+  (Claude / Codex / Gemini / OpenClaw) are unaffected.
+- `q` / Ctrl-C now restore stdin raw mode reliably — the shell no
+  longer freezes for ~1 minute after exit.
+
+### Cancelled (with documented reasoning in Linear)
+- Diff-attribution (AUR-182), cross-agent session correlation
+  (AUR-183), replay mode (AUR-184). See ticket descriptions for the
+  research record.
+
 ## [0.0.2] — 2026-04-14
 
 ### Added — claude-devtools parity (v0.3 feature wave)
