@@ -19,6 +19,8 @@ if (arg === "--help" || arg === "-h") {
 Usage:
   agentwatch          launch the TUI
   agentwatch doctor   detect installed agents and print readiness
+  agentwatch mcp      run as an MCP server over stdio (for agents to query
+                      their own history — add to Claude/Cursor MCP config)
   agentwatch --help   show this help
 
 Hotkeys inside the TUI:
@@ -31,6 +33,23 @@ Hotkeys inside the TUI:
 Environment:
   WORKSPACE_ROOT  override the detected workspace root
 `);
+  process.exit(0);
+}
+
+if (arg === "mcp") {
+  try {
+    const { runMcpServer } = await import("./mcp/server.js");
+    await runMcpServer();
+    // Transport keeps the event loop alive via stdin; don't exit here.
+    // It returns when the client disconnects (closes stdin).
+    await new Promise<void>((resolve) => {
+      process.stdin.on("end", resolve);
+      process.stdin.on("close", resolve);
+    });
+  } catch (err) {
+    process.stderr.write(`[agentwatch] mcp error: ${String(err)}\n`);
+    process.exit(1);
+  }
   process.exit(0);
 }
 
