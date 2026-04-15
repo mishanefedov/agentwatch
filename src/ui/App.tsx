@@ -37,6 +37,8 @@ import {
 import { detectWorkspaceRoot } from "../util/workspace.js";
 import { readClaudePermissions } from "../util/claude-permissions.js";
 import { readOpenClawConfig } from "../util/openclaw-config.js";
+import { readCodexPermissions } from "../util/codex-permissions.js";
+import { readGeminiPermissions } from "../util/gemini-permissions.js";
 import type { CursorStatus } from "../adapters/cursor.js";
 
 const MAX_EVENTS = 500;
@@ -452,6 +454,8 @@ export function App() {
   const [agents] = useState(detectAgents());
   const [claudePerms] = useState(() => readClaudePermissions(workspace));
   const [openclawCfg] = useState(() => readOpenClawConfig());
+  const [codexPerms] = useState(() => readCodexPermissions());
+  const [geminiPerms] = useState(() => readGeminiPermissions());
   const [cursorStatus, setCursorStatus] = useState<CursorStatus | undefined>(
     undefined,
   );
@@ -802,7 +806,13 @@ export function App() {
     }
 
     if (state.showPermissions) {
-      const total = permissionRowCount(claudePerms, cursorStatus, openclawCfg);
+      const total = permissionRowCount(
+        claudePerms,
+        cursorStatus,
+        openclawCfg,
+        codexPerms,
+        geminiPerms,
+      );
       const viewport = Math.max(3, rows - 8);
       const maxScroll = Math.max(0, total - viewport);
       if (key.escape || input === "p") {
@@ -1024,6 +1034,8 @@ export function App() {
           claude={claudePerms}
           cursor={cursorStatus}
           openclaw={openclawCfg}
+          codex={codexPerms}
+          gemini={geminiPerms}
           viewportRows={Math.max(3, rows - 8)}
           scrollOffset={state.permissionsScroll}
         />
