@@ -1,7 +1,7 @@
 {
   "name": "@misha_misha/agentwatch",
-  "version": "0.0.2",
-  "description": "Local-only observability for AI coding agents. See what Claude, Codex, Cursor, Gemini, and OpenClaw are touching on your machine — in one timeline.",
+  "version": "0.0.3",
+  "description": "Local-only observability for every AI agent on your machine. Unified timeline across Claude Code, Codex, Gemini CLI, Cursor, OpenClaw — with token attribution, anomaly detection, MCP server mode, OpenTelemetry exporter, and hybrid semantic search. No cloud, no telemetry, no sign-in.",
   "type": "module",
   "author": "Misha Nefedov",
   "repository": {

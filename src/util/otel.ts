@@ -63,7 +63,7 @@ export async function initOtel(): Promise<void> {
     const sdk = new NodeSDK({
       resource: resourceFromAttributes({
         "service.name": "agentwatch",
-        "service.version": "0.0.2",
+        "service.version": "0.0.3",
       }),
       traceExporter: new OTLPTraceExporter({ url: endpoint }),
     });

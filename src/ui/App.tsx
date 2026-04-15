@@ -25,7 +25,11 @@ import {
   type AnomalyFlag,
 } from "../util/anomaly.js";
 import { searchAllSessions } from "../util/cross-search.js";
-import { CrossSearchView, type UnifiedHit } from "./CrossSearchView.js";
+import {
+  SearchView,
+  type SearchMode,
+  type UnifiedHit,
+} from "./SearchView.js";
 import {
   hasIndex,
   indexStats,
@@ -117,17 +121,18 @@ type State = {
   compactionSelectedIdx: number;
   /** Selected turn within the token-attribution view. */
   tokensSelectedIdx: number;
-  /** Cross-session search view state. */
-  crossSearchOpen: boolean;
-  crossSearchQuery: string;
-  crossSearchTyping: boolean;
-  crossSearchResults: UnifiedHit[];
-  crossSearchIdx: number;
-  crossSearchMode: "bm25" | "semantic";
-  crossSearchIndexStatus: string | null;
-  /** When true, the confirmation modal is showing before we start the
-   *  first-run semantic index build. */
-  crossSearchConfirming: { query: string } | null;
+  /** Unified search overlay. Replaces both the old `/` filter and the
+   *  separate `?` cross-search. Mode tabs switch between live (in-buffer
+   *  substring), cross-session (every jsonl on disk), and semantic
+   *  (hybrid BM25 + embeddings). */
+  searchViewOpen: boolean;
+  searchMode: SearchMode;
+  searchQ: string;
+  searchTyping: boolean;
+  searchHits: UnifiedHit[];
+  searchSelectedIdx: number;
+  searchStatus: string | null;
+  searchConfirming: { query: string } | null;
   /** Anomaly banner dismissal — keyed by a signature of current anomalies
    *  so re-flagging a different anomaly reopens the banner. */
   anomalyDismissKey: string | null;
@@ -168,16 +173,16 @@ type Action =
   | { type: "toggle-compaction" }
   | { type: "compaction-move"; delta: number; max: number }
   | { type: "tokens-move"; delta: number; max: number }
-  | { type: "cross-open" }
-  | { type: "cross-close" }
-  | { type: "cross-type"; char: string }
-  | { type: "cross-backspace" }
-  | { type: "cross-submit"; hits: UnifiedHit[] }
-  | { type: "cross-mode"; mode: "bm25" | "semantic" }
-  | { type: "cross-index-status"; status: string | null }
-  | { type: "cross-confirm-start"; query: string }
-  | { type: "cross-confirm-cancel" }
-  | { type: "cross-move"; delta: number }
+  | { type: "search-view-open"; mode?: SearchMode }
+  | { type: "search-view-close" }
+  | { type: "search-view-mode"; mode: SearchMode }
+  | { type: "search-view-type"; char: string }
+  | { type: "search-view-backspace" }
+  | { type: "search-view-submit"; hits: UnifiedHit[] }
+  | { type: "search-view-status"; status: string | null }
+  | { type: "search-view-confirm-start"; query: string }
+  | { type: "search-view-confirm-cancel" }
+  | { type: "search-view-move"; delta: number }
   | { type: "anomaly-dismiss"; key: string }
   | { type: "anomaly-mark-notified"; ids: string[] }
   | { type: "home" }
@@ -383,54 +388,62 @@ function reducer(state: State, action: Action): State {
       );
       return { ...state, tokensSelectedIdx: next };
     }
-    case "cross-open":
+    case "search-view-open":
       return {
         ...state,
-        crossSearchOpen: true,
-        crossSearchTyping: true,
-        crossSearchQuery: "",
-        crossSearchResults: [],
-        crossSearchIdx: 0,
-        crossSearchIndexStatus: null,
+        searchViewOpen: true,
+        searchMode: action.mode ?? state.searchMode,
+        searchTyping: true,
+        searchQ: "",
+        searchHits: [],
+        searchSelectedIdx: 0,
+        searchStatus: null,
+        searchConfirming: null,
       };
-    case "cross-close":
+    case "search-view-close":
       return {
         ...state,
-        crossSearchOpen: false,
-        crossSearchTyping: false,
-        crossSearchQuery: "",
-        crossSearchResults: [],
-        crossSearchIndexStatus: null,
+        searchViewOpen: false,
+        searchTyping: false,
+        searchQ: "",
+        searchHits: [],
+        searchStatus: null,
+        searchConfirming: null,
       };
-    case "cross-mode":
-      return { ...state, crossSearchMode: action.mode };
-    case "cross-index-status":
-      return { ...state, crossSearchIndexStatus: action.status };
-    case "cross-confirm-start":
-      return { ...state, crossSearchConfirming: { query: action.query } };
-    case "cross-confirm-cancel":
-      return { ...state, crossSearchConfirming: null };
-    case "cross-type":
-      return { ...state, crossSearchQuery: state.crossSearchQuery + action.char };
-    case "cross-backspace":
+    case "search-view-mode":
       return {
         ...state,
-        crossSearchQuery: state.crossSearchQuery.slice(0, -1),
+        searchMode: action.mode,
+        // Reset hits when switching mode — they are mode-specific.
+        searchHits: [],
+        searchSelectedIdx: 0,
+        searchStatus: null,
+        searchTyping: true,
       };
-    case "cross-submit":
+    case "search-view-status":
+      return { ...state, searchStatus: action.status };
+    case "search-view-confirm-start":
+      return { ...state, searchConfirming: { query: action.query } };
+    case "search-view-confirm-cancel":
+      return { ...state, searchConfirming: null };
+    case "search-view-type":
+      return { ...state, searchQ: state.searchQ + action.char };
+    case "search-view-backspace":
+      return { ...state, searchQ: state.searchQ.slice(0, -1) };
+    case "search-view-submit":
       return {
         ...state,
-        crossSearchTyping: false,
-        crossSearchResults: action.hits,
-        crossSearchIdx: 0,
+        searchTyping: false,
+        searchHits: action.hits,
+        searchSelectedIdx: 0,
       };
-    case "cross-move": {
-      const max = Math.max(1, state.crossSearchResults.length);
+    case "search-view-move": {
+      const max = Math.max(1, state.searchHits.length);
       const next = Math.max(
         0,
-        Math.min(max - 1, state.crossSearchIdx + action.delta),
+        Math.min(max - 1, state.searchSelectedIdx + action.delta),
       );
-      return { ...state, crossSearchIdx: next };
+      return { ...state, searchSelectedIdx: next };
     }
     case "anomaly-dismiss":
       return { ...state, anomalyDismissKey: action.key };
@@ -529,14 +542,14 @@ export function App() {
     flashMessage: null,
     showHelp: false,
     showTokens: false,
-    crossSearchOpen: false,
-    crossSearchQuery: "",
-    crossSearchTyping: false,
-    crossSearchResults: [],
-    crossSearchIdx: 0,
-    crossSearchMode: "bm25",
-    crossSearchIndexStatus: null,
-    crossSearchConfirming: null,
+    searchViewOpen: false,
+    searchMode: "live",
+    searchQ: "",
+    searchTyping: false,
+    searchHits: [],
+    searchSelectedIdx: 0,
+    searchStatus: null,
+    searchConfirming: null,
     anomalyDismissKey: null,
     anomalyNotified: new Set<string>(),
     showCompaction: false,
@@ -770,82 +783,81 @@ export function App() {
       return;
     }
 
-    // Cross-session search overlay: its own input loop
-    if (state.crossSearchOpen) {
-      // Confirmation modal for first-run semantic build
-      if (state.crossSearchConfirming) {
+    // Unified search overlay (live / cross-session / semantic).
+    if (state.searchViewOpen) {
+      // First-run semantic-index consent modal.
+      if (state.searchConfirming) {
         if (input === "y" || input === "Y") {
-          const q = state.crossSearchConfirming.query;
-          dispatch({ type: "cross-confirm-cancel" });
-          void runSemanticSearch(q, dispatch);
+          const q = state.searchConfirming.query;
+          dispatch({ type: "search-view-confirm-cancel" });
+          void runSemanticSearchUnified(q, dispatch);
           return;
         }
         if (input === "n" || input === "N" || key.escape) {
-          dispatch({ type: "cross-confirm-cancel" });
+          dispatch({ type: "search-view-confirm-cancel" });
           return;
         }
         return;
       }
       if (key.escape) {
-        dispatch({ type: "cross-close" });
+        dispatch({ type: "search-view-close" });
         return;
       }
-      if (state.crossSearchTyping) {
+      // Mode switching works regardless of typing/results focus.
+      if (key.tab) {
+        const order: SearchMode[] = ["live", "cross", "semantic"];
+        const idx = order.indexOf(state.searchMode);
+        const next = order[(idx + 1) % order.length]!;
+        dispatch({ type: "search-view-mode", mode: next });
+        return;
+      }
+      if (state.searchTyping) {
+        // Allow 1/2/3 to switch mode only when the query is empty so
+        // the digit can otherwise be typed into the query.
+        if ((input === "1" || input === "2" || input === "3") && state.searchQ === "") {
+          const map: Record<string, SearchMode> = {
+            "1": "live",
+            "2": "cross",
+            "3": "semantic",
+          };
+          dispatch({ type: "search-view-mode", mode: map[input]! });
+          return;
+        }
         if (key.return) {
-          const q = state.crossSearchQuery;
-          if (state.crossSearchMode === "bm25") {
-            const hits = searchAllSessions(q, 100).map(
-              (h): UnifiedHit => ({ kind: "bm25", hit: h }),
-            );
-            dispatch({ type: "cross-submit", hits });
-          } else {
-            // First-run: show confirmation. Subsequent runs skip the prompt.
-            const needsBuild = !hasIndex() || indexStats().vectors === 0;
-            if (needsBuild) {
-              dispatch({ type: "cross-confirm-start", query: q });
-            } else {
-              void runSemanticSearch(q, dispatch);
-            }
-          }
+          const q = state.searchQ;
+          runUnifiedSearch(q, state.searchMode, state.events, dispatch);
           return;
         }
         if (key.backspace || key.delete) {
-          dispatch({ type: "cross-backspace" });
-          return;
-        }
-        if (input === "s" && state.crossSearchQuery === "") {
-          dispatch({
-            type: "cross-mode",
-            mode: state.crossSearchMode === "bm25" ? "semantic" : "bm25",
-          });
+          dispatch({ type: "search-view-backspace" });
           return;
         }
         if (input && !key.ctrl && !key.meta) {
-          dispatch({ type: "cross-type", char: input });
+          dispatch({ type: "search-view-type", char: input });
           return;
         }
         return;
       }
-      if (input === "s") {
-        dispatch({
-          type: "cross-mode",
-          mode: state.crossSearchMode === "bm25" ? "semantic" : "bm25",
-        });
-        return;
-      }
+      // Result-list focus.
       if (key.downArrow || input === "j") {
-        dispatch({ type: "cross-move", delta: 1 });
+        dispatch({ type: "search-view-move", delta: 1 });
         return;
       }
       if (key.upArrow || input === "k") {
-        dispatch({ type: "cross-move", delta: -1 });
+        dispatch({ type: "search-view-move", delta: -1 });
         return;
       }
       if (key.return) {
-        const hit = state.crossSearchResults[state.crossSearchIdx];
-        if (hit) {
-          const sid = hit.kind === "bm25" ? hit.hit.sessionId : hit.hit.sessionId;
-          dispatch({ type: "cross-close" });
+        const hit = state.searchHits[state.searchSelectedIdx];
+        if (!hit) return;
+        if (hit.kind === "live") {
+          // Apply the query as a sticky filter on the main timeline.
+          dispatch({ type: "search-view-close" });
+          // Re-purpose the existing top-level searchQuery as the filter.
+          dispatch({ type: "search-input", char: "" }); // ensure clean
+        } else {
+          const sid = hit.kind === "cross" ? hit.hit.sessionId : hit.hit.sessionId;
+          dispatch({ type: "search-view-close" });
           dispatch({ type: "sessions-open-selected", sessionId: sid });
         }
         return;
@@ -994,8 +1006,10 @@ export function App() {
       }
       return;
     }
-    if (input === "/") dispatch({ type: "open-search" });
-    if (input === "?") dispatch({ type: "cross-open" });
+    // Unified search overlay (live / cross-session / semantic).
+    if (input === "/") dispatch({ type: "search-view-open", mode: "live" });
+    // ? toggles the help overlay (the natural mnemonic).
+    if (input === "?") dispatch({ type: "toggle-help" });
     if (input === "D" && anomalyKey) {
       dispatch({ type: "anomaly-dismiss", key: anomalyKey });
     }
@@ -1062,6 +1076,7 @@ export function App() {
         dispatch({ type: "tokens-move", delta: -1, max });
       }
     }
+    if (input === "0") dispatch({ type: "home" });
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") {
       dispatch({ type: "set-project-filter", project: null });
@@ -1134,15 +1149,16 @@ export function App() {
       />
       {state.showHelp ? (
         <HelpView />
-      ) : state.crossSearchOpen ? (
-        <CrossSearchView
-          query={state.crossSearchQuery}
-          hits={state.crossSearchResults}
-          selectedIdx={state.crossSearchIdx}
+      ) : state.searchViewOpen ? (
+        <SearchView
+          mode={state.searchMode}
+          query={state.searchQ}
+          typing={state.searchTyping}
+          hits={state.searchHits}
+          selectedIdx={state.searchSelectedIdx}
           viewportRows={Math.max(3, rows - 8)}
-          mode={state.crossSearchMode}
-          indexingStatus={state.crossSearchIndexStatus}
-          confirming={state.crossSearchConfirming}
+          statusText={state.searchStatus}
+          confirming={state.searchConfirming}
         />
       ) : state.showCompaction && state.sessionFilter ? (
         <CompactionView
@@ -1232,53 +1248,118 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[?] help  [q] quit  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens  [C] compact" : ""}  [Z] clear filters`}
+                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens  [C] compact" : ""}  [Z] clear filters`}
         </Text>
       </Box>
     </Box>
   );
 }
 
-/** Kick off a semantic search. Ensures the index exists (builds if
- *  missing), embeds the query, fuses BM25 + vector hits with RRF, and
- *  dispatches the result to the cross-search view. Falls back to
- *  BM25-only if the embedder fails to load. */
-async function runSemanticSearch(
+/** Run the right search engine for the current mode and dispatch the
+ *  results into the unified search view. Live mode is sync; cross + sem
+ *  may be async. */
+function runUnifiedSearch(
+  query: string,
+  mode: SearchMode,
+  events: AgentEvent[],
+  dispatch: React.Dispatch<Action>,
+): void {
+  if (!query) {
+    dispatch({ type: "search-view-submit", hits: [] });
+    dispatch({
+      type: "search-view-status",
+      status: "(type a query, then enter)",
+    });
+    return;
+  }
+  if (mode === "live") {
+    const needle = query.toLowerCase();
+    const matches = events
+      .filter((e) => matchesLive(e, needle))
+      .slice(0, 200)
+      .map<UnifiedHit>((e) => ({ kind: "live", event: e }));
+    dispatch({ type: "search-view-submit", hits: matches });
+    dispatch({
+      type: "search-view-status",
+      status: matches.length === 0 ? "(no matches in the live buffer)" : null,
+    });
+    return;
+  }
+  if (mode === "cross") {
+    const hits = searchAllSessions(query, 100).map<UnifiedHit>((h) => ({
+      kind: "cross",
+      hit: h,
+    }));
+    dispatch({ type: "search-view-submit", hits });
+    dispatch({
+      type: "search-view-status",
+      status:
+        hits.length === 0
+          ? "(no matches across session files — try semantic mode for fuzzier results)"
+          : null,
+    });
+    return;
+  }
+  // Semantic: gate on first-run consent.
+  const needsBuild = !hasIndex() || indexStats().vectors === 0;
+  if (needsBuild) {
+    dispatch({ type: "search-view-confirm-start", query });
+    return;
+  }
+  void runSemanticSearchUnified(query, dispatch);
+}
+
+function matchesLive(e: AgentEvent, needle: string): boolean {
+  if ((e.summary ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.path ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.cmd ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.tool ?? "").toLowerCase().includes(needle)) return true;
+  if ((e.agent ?? "").toLowerCase().includes(needle)) return true;
+  const d = e.details;
+  if (d?.fullText && d.fullText.toLowerCase().includes(needle)) return true;
+  if (d?.thinking && d.thinking.toLowerCase().includes(needle)) return true;
+  return false;
+}
+
+async function runSemanticSearchUnified(
   query: string,
   dispatch: React.Dispatch<Action>,
 ): Promise<void> {
   try {
     if (!hasIndex() || indexStats().vectors === 0) {
       dispatch({
-        type: "cross-index-status",
+        type: "search-view-status",
         status: "Building semantic index (first-run model download ~80MB)…",
       });
       await buildSemanticIndex({
         onProgress: (p) => {
           dispatch({
-            type: "cross-index-status",
+            type: "search-view-status",
             status: `Indexed ${p.embeddedTurns}/${p.queuedTurns} turns across ${p.scannedFiles} files`,
           });
         },
       });
-      dispatch({ type: "cross-index-status", status: "Embedding query…" });
+      dispatch({ type: "search-view-status", status: "Embedding query…" });
     }
     const embed = await loadEmbedder();
     const qvec = await embed(query);
     const hits = await searchHybrid(query, new Float32Array(qvec), 50);
     dispatch({
-      type: "cross-submit",
+      type: "search-view-submit",
       hits: hits.map((h) => ({ kind: "semantic" as const, hit: h })),
     });
-    dispatch({ type: "cross-index-status", status: null });
+    dispatch({
+      type: "search-view-status",
+      status: hits.length === 0 ? "(no semantic matches)" : null,
+    });
   } catch (err) {
     dispatch({
-      type: "cross-index-status",
-      status: `Semantic search unavailable (${String(err).slice(0, 120)}) — falling back to BM25`,
+      type: "search-view-status",
+      status: `Semantic search unavailable (${String(err).slice(0, 120)}) — fell back to BM25`,
     });
     const hits = searchBm25Only(query, 50);
     dispatch({
-      type: "cross-submit",
+      type: "search-view-submit",
       hits: hits.map((h) => ({ kind: "semantic" as const, hit: h })),
     });
   }

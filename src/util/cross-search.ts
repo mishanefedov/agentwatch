@@ -27,9 +27,11 @@ export function searchAllSessions(
   const roots = sessionRoots(home);
   if (roots.length === 0) return [];
   const rg = hasRipgrep();
-  const hits = rg
-    ? searchWithRipgrep(query, roots, limit)
-    : searchNative(query, roots, limit);
+  let hits = rg ? searchWithRipgrep(query, roots, limit) : [];
+  // Defensive: if rg returns nothing, fall back to native — covers
+  // older rg builds where the glob pattern misbehaves and would
+  // otherwise leave the user staring at an empty result.
+  if (hits.length === 0) hits = searchNative(query, roots, limit);
   return hits.slice(0, limit);
 }
 
@@ -58,13 +60,18 @@ function searchWithRipgrep(
   roots: string[],
   limit: number,
 ): SearchHit[] {
+  // Two separate --glob args instead of brace expansion. Brace
+  // expansion in ripgrep's globset is supported but flaky across rg
+  // versions; two flags are unambiguous.
   const args = [
     "--fixed-strings",
     "--ignore-case",
     "--no-heading",
     "--line-number",
     "--glob",
-    "*.{jsonl,json}",
+    "*.jsonl",
+    "--glob",
+    "*.json",
     query,
     ...roots,
   ];
