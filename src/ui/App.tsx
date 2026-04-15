@@ -11,6 +11,7 @@ import { SessionsView, sessionLineCount } from "./SessionsView.js";
 import { buildProjectIndex, buildSessionRows } from "../util/project-index.js";
 import { copyToClipboard, eventToYankText } from "../util/clipboard.js";
 import { exportSession } from "../util/export.js";
+import { restoreTerminal } from "../util/terminal.js";
 import { notify, shouldNotify } from "../util/notifier.js";
 import { HelpView } from "./HelpView.js";
 import { Breadcrumb } from "./Breadcrumb.js";
@@ -434,6 +435,7 @@ export function App() {
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       exit();
+      restoreTerminal();
       setImmediate(() => process.exit(0));
       return;
     }
@@ -461,6 +463,7 @@ export function App() {
 
     if (input === "q") {
       exit();
+      restoreTerminal();
       setImmediate(() => process.exit(0));
       return;
     }
