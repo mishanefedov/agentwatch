@@ -68,7 +68,7 @@ export function detectAgents(): DetectedAgent[] {
       label: "Codex",
       configPath: join(home, ".codex", "sessions"),
       present: existsSync(join(home, ".codex")),
-      instrumented: false,
+      instrumented: true,
     },
     {
       name: "aider",
