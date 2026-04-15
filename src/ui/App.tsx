@@ -15,6 +15,7 @@ import { restoreTerminal } from "../util/terminal.js";
 import { attributeTokens } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
+import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { searchAllSessions, type SearchHit } from "../util/cross-search.js";
 import { CrossSearchView } from "./CrossSearchView.js";
 import { notify, shouldNotify } from "../util/notifier.js";
@@ -433,10 +434,12 @@ export function App() {
   });
 
   useEffect(() => {
+    if (otelEnabled()) void initOtel();
     const launchedAt = Date.now();
     const sink: EventSink = {
       emit: (e: AgentEvent) => {
         dispatch({ type: "event", event: e });
+        emitEventSpan(e);
         const eventMs = new Date(e.ts).getTime();
         if (eventMs < launchedAt) return;
         const alert = shouldNotify(e);
