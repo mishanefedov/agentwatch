@@ -63,6 +63,36 @@ stack, in the terminal, with zero infrastructure and zero network.**
 
 ---
 
+## Why this over `claude-devtools` if you run multiple agents?
+
+Short, factual diff. `claude-devtools` is a great tool for Claude-only
+workflows — if you only use Claude Code, it's probably the better pick.
+agentwatch is the answer when you run more than one agent on the same
+machine and want one timeline + one cost ledger + one alerting surface
+across all of them.
+
+| What                                         | claude-devtools         | **agentwatch**                        |
+| -------------------------------------------- | ----------------------- | ------------------------------------- |
+| Claude Code coverage                         | ✅ full                 | ✅ full                               |
+| Codex coverage                               | ❌                      | ✅ tokens + tools + cost + compaction |
+| Gemini CLI coverage                          | ❌                      | ✅ tokens + tools + cost              |
+| OpenClaw coverage                            | ❌                      | ✅ tokens + cost                      |
+| Cursor coverage                              | ❌                      | 🟡 config level                       |
+| Per-agent budget alarms                      | ❌                      | ✅ session + daily caps                |
+| Statistical anomaly detection (loops / spikes) | rule-based only      | ✅ MAD z-score + period-1-to-4 loops  |
+| OpenTelemetry exporter (`gen_ai.*`)          | ❌                      | ✅ Jaeger / Tempo / Grafana ready      |
+| MCP server — agents query their own history  | ❌                      | ✅ 5 tools over stdio                  |
+| User-defined regex/threshold triggers        | ❌                      | ✅ live-reloaded                       |
+| Install                                      | Homebrew / Electron ~150 MB | `npm i -g` · 220 KB · TUI          |
+| Data boundary                                | local                   | local                                 |
+
+If "every agent on one pane of glass + programmatic access via MCP +
+pipeline-friendly OTel" matches your setup, agentwatch is the tool.
+If you're Claude-only and want the Electron polish, `claude-devtools`
+is still excellent.
+
+---
+
 ## Install
 
 ```bash
