@@ -55,6 +55,27 @@ export interface EventDetails {
   /** Subagent id extracted from a Claude `Agent` tool_result.
    *  Events spawned by that run are stored in sessionId = `agent-<id>`. */
   subAgentId?: string;
+  /** Set when this event represents one agent invoking another via the
+   *  child agent's CLI (e.g. `codex exec`, `gemini -p`). The parent
+   *  event is the outer Bash / shell_exec; the spawned child agent's
+   *  session events get linked back via `parentSpawnId` (AUR-200). */
+  agentCall?: {
+    callee: AgentName;
+    /** Extracted prompt argument when we can parse it (`-p ...`,
+     *  `exec ...`, etc.). Undefined when the invocation was free-form. */
+    prompt?: string;
+    /** Sub-shape of the call: `exec` is "give a prompt and exit",
+     *  `chat` is interactive REPL, `unknown` is a generic invocation
+     *  whose semantics we couldn't classify. */
+    kind: "exec" | "chat" | "unknown";
+    /** Optional model the child was invoked with (e.g. `ollama run llama3`). */
+    model?: string;
+  };
+  /** Linked back to the parent agent_call event id when this event
+   *  belongs to a session that was spawned by a Bash(<agent-cli>) call.
+   *  Set on the *first* event of the spawned session — descendants
+   *  inherit by sessionId. */
+  parentSpawnId?: string;
 }
 
 /** Sink passed to adapters. Adapters emit new events and may later
