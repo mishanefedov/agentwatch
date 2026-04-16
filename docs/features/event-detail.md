@@ -1,5 +1,11 @@
 # Event detail pane
 
+## Contract
+
+**GOAL:** Full-screen overlay exposing every field of one selected event — prompt, tool input, tool result, thinking, tokens, cost.
+**USER_VALUE:** Debug what an agent actually sent and received without tailing JSONL files by hand.
+**COUNTERFACTUAL:** Users drop to a terminal, grep raw logs, and lose the context of the surrounding timeline.
+
 ## What it does
 
 Full-screen overlay showing every field of the selected event: token

@@ -1,5 +1,11 @@
 # Subagent drilldown
 
+## Contract
+
+**GOAL:** Scope the timeline to a single Claude-Code subagent's inner tool calls.
+**USER_VALUE:** Post-mortem "what did this delegated task actually do" without parsing the parent session log.
+**COUNTERFACTUAL:** Subagent activity drowns in the parent session; failed delegations go unnoticed.
+
 ## What it does
 
 Claude Code's `Task` (Agent) tool spawns a subagent with its own inner

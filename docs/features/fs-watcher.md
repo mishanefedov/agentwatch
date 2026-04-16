@@ -1,5 +1,11 @@
 # Filesystem watcher
 
+## Contract
+
+**GOAL:** Emit timeline events for workspace file changes that no instrumented adapter attributed.
+**USER_VALUE:** Catch writes from manual edits or non-instrumented agents (Aider, Cline, Windsurf) so the timeline isn't blind.
+**COUNTERFACTUAL:** Multi-agent users see a partial picture — only the instrumented agents — while unrelated writes silently change their tree.
+
 ## What it does
 
 A catch-all for file changes in your workspace that didn't come from

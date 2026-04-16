@@ -1,5 +1,11 @@
 # Yank to clipboard
 
+## Contract
+
+**GOAL:** One-key copy of the most useful payload from the selected event or detail pane to the system clipboard.
+**USER_VALUE:** Move an agent's prompt, tool call, or output into Slack or an editor in under a second — no mouse, no re-selection.
+**COUNTERFACTUAL:** Users screenshot the TUI or retype tool commands, losing fidelity and time.
+
 ## What it does
 
 Press `y` on any selected timeline row or inside the detail pane.
