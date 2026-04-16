@@ -1,5 +1,11 @@
 # Search
 
+## Contract
+
+**GOAL:** In-buffer full-text filter over the live timeline, with sticky query and breadcrumb.
+**USER_VALUE:** Find the one event you need in a 500-row buffer in under a second — no scrolling, no missed matches when the stream moves.
+**COUNTERFACTUAL:** Users must scroll and eyeball-filter; matches escape when rows scroll off under load.
+
 ## What it does
 
 In-buffer full-text filter. Press `/`, type a query, the timeline narrows
@@ -16,7 +22,7 @@ to matches.
 
 ## Inputs
 
-`matchesQuery(event, query)` in `src/ui/App.tsx`:
+`matchesQuery(event, query)` in `src/ui/state.ts`:
 - Case-insensitive substring search
 - Checks: summary, path, cmd, tool, agent, `details.fullText`,
   `details.thinking`

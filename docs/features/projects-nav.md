@@ -1,5 +1,11 @@
 # Projects navigation
 
+## Contract
+
+**GOAL:** Grid of every workspace path seen by any agent; Enter scopes to that workspace's sessions.
+**USER_VALUE:** Jump between projects on a multi-repo machine without typing paths or guessing session ids.
+**COUNTERFACTUAL:** Users scroll a mixed timeline that mashes every project together — slow to orient.
+
 ## What it does
 
 Press `P` to open a projects grid aggregating every workspace path across

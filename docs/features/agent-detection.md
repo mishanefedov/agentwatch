@@ -1,5 +1,11 @@
 # Agent detection
 
+## Contract
+
+**GOAL:** Surface which AI coding agents are installed and whether agentwatch instruments each one.
+**USER_VALUE:** Answer "why am I not seeing events from <agent>?" in one glance, without a support thread.
+**COUNTERFACTUAL:** Silent miss-detection — a user thinks agentwatch covers their Codex runs while it isn't emitting.
+
 ## What it does
 
 Surfaces which AI coding agents are installed on this machine, and

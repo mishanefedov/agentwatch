@@ -5,6 +5,12 @@ Code, Cursor, custom LangChain/CrewAI agents, …) so running agents can
 inspect what they — or other agents — did before. All local. No
 network. No telemetry.
 
+## Contract
+
+**GOAL:** Serve this machine's agent history via MCP so any client can query it without cloud or custom wiring.
+**USER_VALUE:** A running agent can ask "what did I do last session?" and hand context to the next agent without manual copy-paste.
+**COUNTERFACTUAL:** Agents repeatedly re-discover what a prior run already learned; no cross-agent handoff across the multi-agent stack.
+
 ## Quick start
 
 ```bash

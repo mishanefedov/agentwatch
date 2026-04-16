@@ -1,5 +1,11 @@
 # Permissions view
 
+## Contract
+
+**GOAL:** Side-by-side view of every agent's permission and config surface, flagging dangerous patterns.
+**USER_VALUE:** Audit "what is each agent allowed to do" in one screen instead of reading five config files.
+**COUNTERFACTUAL:** Permission drift goes unnoticed; a dangerous allowlist entry survives until it fires.
+
 ## What it does
 
 Press `p` to see a scrollable view of every agent's permission /

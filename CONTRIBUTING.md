@@ -22,6 +22,31 @@ answers are in the [roadmap](https://linear.app/auraqu/project/agentwatch-748d6a
 - **Integrations that ship data off-machine.** agentwatch is local-only by
   principle. An "upload to …" PR will be closed.
 
+## Feature gate (for new features)
+
+Every user-visible feature needs a contract written *before* the code, and
+a test that exercises it *before* it merges. The contract lives at the top
+of `docs/features/<name>.md` with three fields:
+
+```markdown
+## Contract
+
+**GOAL:** One line. What the feature accomplishes.
+**USER_VALUE:** One line. Why a user cares. If this is generic ("better UX"),
+the feature is bloat — don't build it.
+**COUNTERFACTUAL:** One line. What breaks if this feature is removed. This
+defines the testable regression surface.
+```
+
+`src/util/feature-contract.test.ts` fails CI if any `docs/features/*.md`
+file is missing a field. It can't enforce *quality* of the three fields —
+review is the second gate. If `USER_VALUE` could fit any feature or
+`COUNTERFACTUAL` is "nothing breaks," that's a kill signal.
+
+For the test side: non-trivial reducer changes should land a test in
+`src/ui/state.test.ts`. UI-rendering regressions that aren't reducer-shaped
+still fall back to the manual walkthrough in `docs/testing/TEST-SCRIPT.md`.
+
 ## Dev setup
 
 ```bash
@@ -55,7 +80,9 @@ Every adapter:
 ## PR checklist
 
 - [ ] `npm run typecheck` passes
-- [ ] `npm test` passes
+- [ ] `npm test` passes (includes the feature-contract gate)
+- [ ] If the PR adds a user-visible feature: contract block added to
+      `docs/features/<name>.md` and a test asserts its `COUNTERFACTUAL`
 - [ ] Added a test if the change is non-trivial
 - [ ] CHANGELOG.md updated if the change is user-visible
 - [ ] Commit message describes *why*, not just *what*

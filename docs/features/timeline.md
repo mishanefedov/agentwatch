@@ -1,5 +1,11 @@
 # Timeline
 
+## Contract
+
+**GOAL:** Unified reverse-chronological view of every event from every instrumented agent on this machine.
+**USER_VALUE:** One pane to triage multi-agent activity — Claude, Codex, OpenClaw, Gemini side by side, nothing to correlate manually.
+**COUNTERFACTUAL:** Users tail five JSONLs in five terminals and correlate timestamps by eye.
+
 ## What it does
 
 The main view. Every event emitted by any installed agent streams into a

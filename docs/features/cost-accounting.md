@@ -1,5 +1,11 @@
 # Cost with cache-hit accounting
 
+## Contract
+
+**GOAL:** Per-turn USD cost from real usage data, aggregated per agent, session, and project.
+**USER_VALUE:** Spot a runaway agent or spend spike before the monthly invoice shows up.
+**COUNTERFACTUAL:** Cost stays opaque until the provider invoice; users can't tie spend to a specific session or task.
+
 ## What it does
 
 Per-assistant-turn USD cost, computed from the Claude `message.usage`

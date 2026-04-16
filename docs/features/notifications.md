@@ -1,5 +1,11 @@
 # Desktop notifications
 
+## Contract
+
+**GOAL:** OS-native desktop notifications for high-risk events, rate-limited and silent during backfill.
+**USER_VALUE:** Know the moment an agent runs something destructive, even when the TUI isn't focused.
+**COUNTERFACTUAL:** Users must babysit the TUI to catch dangerous events in time; a shell_exec rm lands unnoticed.
+
 ## What it does
 
 Fires OS-native notifications on sensitive events. Rate-limited so a

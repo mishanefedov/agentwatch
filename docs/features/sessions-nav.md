@@ -1,5 +1,11 @@
 # Sessions navigation
 
+## Contract
+
+**GOAL:** Date-bucketed list of every session for one project, across every agent; Enter scopes the timeline.
+**USER_VALUE:** Review yesterday's Claude session and today's Codex session for the same repo in seconds.
+**COUNTERFACTUAL:** Users manually match timestamps across five JSONL dirs to reconstruct a session.
+
 ## What it does
 
 After picking a project, shows every session for that project across
