@@ -21,6 +21,11 @@ import {
   callGraphRowCount,
   callGraphSelectedSession,
 } from "./CallGraphView.js";
+import {
+  ScheduledView,
+  scheduledRowCount,
+  scheduledSelectedSessionId,
+} from "./ScheduledView.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { watchTriggers } from "../util/triggers.js";
 import {
@@ -127,6 +132,9 @@ type State = {
   /** Call-graph overlay for the currently scoped session. */
   showCallGraph: boolean;
   callGraphSelectedIdx: number;
+  /** Scheduled-tasks overlay (cron + heartbeat). */
+  showScheduled: boolean;
+  scheduledSelectedIdx: number;
   /** Selected turn within the token-attribution view. */
   tokensSelectedIdx: number;
   /** Unified search overlay. Replaces both the old `/` filter and the
@@ -182,6 +190,8 @@ type Action =
   | { type: "compaction-move"; delta: number; max: number }
   | { type: "toggle-call-graph" }
   | { type: "call-graph-move"; delta: number; max: number }
+  | { type: "toggle-scheduled" }
+  | { type: "scheduled-move"; delta: number; max: number }
   | { type: "tokens-move"; delta: number; max: number }
   | { type: "search-view-open"; mode?: SearchMode }
   | { type: "search-view-close" }
@@ -404,6 +414,20 @@ function reducer(state: State, action: Action): State {
       );
       return { ...state, callGraphSelectedIdx: next };
     }
+    case "toggle-scheduled":
+      return {
+        ...state,
+        showScheduled: !state.showScheduled,
+        scheduledSelectedIdx: 0,
+      };
+    case "scheduled-move": {
+      if (action.max <= 0) return state;
+      const next = Math.max(
+        0,
+        Math.min(action.max - 1, state.scheduledSelectedIdx + action.delta),
+      );
+      return { ...state, scheduledSelectedIdx: next };
+    }
     case "tokens-move": {
       if (action.max <= 0) return state;
       const next = Math.max(
@@ -581,6 +605,8 @@ export function App() {
     tokensSelectedIdx: 0,
     showCallGraph: false,
     callGraphSelectedIdx: 0,
+    showScheduled: false,
+    scheduledSelectedIdx: 0,
   });
 
   useEffect(() => {
@@ -1087,6 +1113,28 @@ export function App() {
     if (input === "g" && state.sessionFilter) {
       dispatch({ type: "toggle-call-graph" });
     }
+    if (input === "S") {
+      dispatch({ type: "toggle-scheduled" });
+    }
+    if (state.showScheduled) {
+      const max = scheduledRowCount(state.events);
+      if (key.downArrow || input === "j") {
+        dispatch({ type: "scheduled-move", delta: 1, max });
+      }
+      if (key.upArrow || input === "k") {
+        dispatch({ type: "scheduled-move", delta: -1, max });
+      }
+      if (key.return) {
+        const sid = scheduledSelectedSessionId(
+          state.events,
+          state.scheduledSelectedIdx,
+        );
+        if (sid) {
+          dispatch({ type: "toggle-scheduled" });
+          dispatch({ type: "sessions-open-selected", sessionId: sid });
+        }
+      }
+    }
     if (state.showCallGraph && state.sessionFilter) {
       const max = callGraphRowCount(state.events, state.sessionFilter);
       if (key.downArrow || input === "j") {
@@ -1209,6 +1257,12 @@ export function App() {
           statusText={state.searchStatus}
           confirming={state.searchConfirming}
         />
+      ) : state.showScheduled ? (
+        <ScheduledView
+          events={state.events}
+          selectedIdx={state.scheduledSelectedIdx}
+          viewportRows={Math.max(3, rows - 8)}
+        />
       ) : state.showCallGraph && state.sessionFilter ? (
         <CallGraphView
           events={state.events}
@@ -1304,7 +1358,7 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens  [C] compact  [g] callgraph" : ""}  [Z] clear filters`}
+                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [S] scheduled  [e] export${state.sessionFilter ? "  [t] tokens  [C] compact  [g] callgraph" : ""}  [Z] clear filters`}
         </Text>
       </Box>
     </Box>
