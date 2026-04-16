@@ -1,11 +1,15 @@
 import chokidar from "chokidar";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { basename, join, sep } from "node:path";
 import { homedir } from "node:os";
 import type { AgentEvent, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
+import {
+  classifySessionKey,
+  type ScheduledMarker,
+} from "../util/openclaw-cron.js";
 
 import type { EventSink } from "../schema.js";
 
@@ -19,6 +23,48 @@ interface FileCursor {
 // later messages in the same session inherit it so we can tag events
 // with a project label.
 const sessionCwd = new Map<string, string>();
+
+// AUR-205/206: cache (sessionId → ScheduledMarker) so events from a
+// cron-spawned or heartbeat-triggered session pick up `details.scheduled`.
+// Filled lazily by reading each agent's sessions.json the first time
+// we touch one of its session files.
+const scheduledBySessionId = new Map<string, ScheduledMarker>();
+const sessionsJsonRead = new Set<string>();
+
+function loadScheduledMarkers(file: string): void {
+  // Resolve to .../agents/<agentId>/sessions/sessions.json
+  const dir = file.split(sep).slice(0, -1).join(sep);
+  const jsonPath = join(dir, "sessions.json");
+  if (sessionsJsonRead.has(jsonPath)) return;
+  sessionsJsonRead.add(jsonPath);
+  let raw: string;
+  try {
+    raw = readFileSync(jsonPath, "utf8");
+  } catch {
+    return;
+  }
+  let doc: unknown;
+  try {
+    doc = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!doc || typeof doc !== "object") return;
+  for (const [sessionKey, entryRaw] of Object.entries(
+    doc as Record<string, unknown>,
+  )) {
+    const entry = (entryRaw ?? {}) as Record<string, unknown>;
+    const marker = classifySessionKey(sessionKey, entry);
+    if (!marker) continue;
+    const sid = entry.sessionId;
+    if (typeof sid === "string") scheduledBySessionId.set(sid, marker);
+  }
+}
+
+export function _resetOpenClawScheduledCache(): void {
+  scheduledBySessionId.clear();
+  sessionsJsonRead.clear();
+}
 
 export function startOpenClawAdapter(sink: Emit): () => void {
   const emit = typeof sink === "function" ? sink : sink.emit;
@@ -75,6 +121,10 @@ function processSession(
 ) {
   const subAgent = extractSubAgent(file);
   const sessionId = basename(file, ".jsonl");
+  // Lazy-load the per-agent sessions.json so we know whether this
+  // session was spawned by cron or by a heartbeat run.
+  loadScheduledMarkers(file);
+  const marker = scheduledBySessionId.get(sessionId);
   streamLines(file, startFromEnd, cursors, (line) => {
     let obj: unknown;
     try {
@@ -83,7 +133,19 @@ function processSession(
       return;
     }
     const event = translateSession(obj, subAgent, sessionId);
-    if (event) emit(event);
+    if (!event) return;
+    if (marker) {
+      event.details = {
+        ...(event.details ?? {}),
+        scheduled: {
+          kind: marker.kind,
+          jobId: marker.jobId,
+          agentId: marker.agentId,
+          runId: marker.runId,
+        },
+      };
+    }
+    emit(event);
   });
 }
 
