@@ -55,6 +55,7 @@ const GROUPS: Group[] = [
       ["p", "permissions (Claude + Codex + Gemini + Cursor + OpenClaw)"],
       ["t", "token attribution (only inside a scoped session)"],
       ["C", "context compaction visualizer (only inside a scoped session)"],
+      ["g", "agent call graph (only inside a scoped session)"],
       ["↑↓ / j k inside any view", "scroll"],
     ],
   },
