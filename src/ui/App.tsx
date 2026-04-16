@@ -16,6 +16,11 @@ import { attributeTokens, attributeTurns } from "../util/token-attribution.js";
 import { TokensView } from "./TokensView.js";
 import { computeBudgetStatus } from "../util/budgets.js";
 import { CompactionView, compactionPointCount } from "./CompactionView.js";
+import {
+  CallGraphView,
+  callGraphRowCount,
+  callGraphSelectedSession,
+} from "./CallGraphView.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { watchTriggers } from "../util/triggers.js";
 import {
@@ -119,6 +124,9 @@ type State = {
   /** Compaction visualizer overlay for the currently scoped session. */
   showCompaction: boolean;
   compactionSelectedIdx: number;
+  /** Call-graph overlay for the currently scoped session. */
+  showCallGraph: boolean;
+  callGraphSelectedIdx: number;
   /** Selected turn within the token-attribution view. */
   tokensSelectedIdx: number;
   /** Unified search overlay. Replaces both the old `/` filter and the
@@ -172,6 +180,8 @@ type Action =
   | { type: "toggle-tokens" }
   | { type: "toggle-compaction" }
   | { type: "compaction-move"; delta: number; max: number }
+  | { type: "toggle-call-graph" }
+  | { type: "call-graph-move"; delta: number; max: number }
   | { type: "tokens-move"; delta: number; max: number }
   | { type: "search-view-open"; mode?: SearchMode }
   | { type: "search-view-close" }
@@ -380,6 +390,20 @@ function reducer(state: State, action: Action): State {
       );
       return { ...state, compactionSelectedIdx: next };
     }
+    case "toggle-call-graph":
+      return {
+        ...state,
+        showCallGraph: !state.showCallGraph,
+        callGraphSelectedIdx: 0,
+      };
+    case "call-graph-move": {
+      if (action.max <= 0) return state;
+      const next = Math.max(
+        0,
+        Math.min(action.max - 1, state.callGraphSelectedIdx + action.delta),
+      );
+      return { ...state, callGraphSelectedIdx: next };
+    }
     case "tokens-move": {
       if (action.max <= 0) return state;
       const next = Math.max(
@@ -555,6 +579,8 @@ export function App() {
     showCompaction: false,
     compactionSelectedIdx: 0,
     tokensSelectedIdx: 0,
+    showCallGraph: false,
+    callGraphSelectedIdx: 0,
   });
 
   useEffect(() => {
@@ -1058,6 +1084,29 @@ export function App() {
     if (input === "C" && state.sessionFilter) {
       dispatch({ type: "toggle-compaction" });
     }
+    if (input === "g" && state.sessionFilter) {
+      dispatch({ type: "toggle-call-graph" });
+    }
+    if (state.showCallGraph && state.sessionFilter) {
+      const max = callGraphRowCount(state.events, state.sessionFilter);
+      if (key.downArrow || input === "j") {
+        dispatch({ type: "call-graph-move", delta: 1, max });
+      }
+      if (key.upArrow || input === "k") {
+        dispatch({ type: "call-graph-move", delta: -1, max });
+      }
+      if (key.return) {
+        const sid = callGraphSelectedSession(
+          state.events,
+          state.sessionFilter,
+          state.callGraphSelectedIdx,
+        );
+        if (sid && sid !== state.sessionFilter) {
+          dispatch({ type: "toggle-call-graph" });
+          dispatch({ type: "sessions-open-selected", sessionId: sid });
+        }
+      }
+    }
     if (state.showCompaction && state.sessionFilter) {
       const max = compactionPointCount(state.events, state.sessionFilter);
       if (key.leftArrow || input === "h") {
@@ -1160,6 +1209,13 @@ export function App() {
           statusText={state.searchStatus}
           confirming={state.searchConfirming}
         />
+      ) : state.showCallGraph && state.sessionFilter ? (
+        <CallGraphView
+          events={state.events}
+          rootSessionId={state.sessionFilter}
+          selectedIdx={state.callGraphSelectedIdx}
+          viewportRows={Math.max(3, rows - 8)}
+        />
       ) : state.showCompaction && state.sessionFilter ? (
         <CompactionView
           events={state.events}
@@ -1248,7 +1304,7 @@ export function App() {
                 ? "[↑↓] select project  [enter] sessions  [esc] close"
                 : state.detailOpen
                 ? "[esc] close  [↑↓] scroll"
-                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens  [C] compact" : ""}  [Z] clear filters`}
+                : `[?] help  [q] quit  [0] home  [esc] back  [↑↓] select  [enter] detail  [/] search  [P] projects  [p] permissions  [e] export${state.sessionFilter ? "  [t] tokens  [C] compact  [g] callgraph" : ""}  [Z] clear filters`}
         </Text>
       </Box>
     </Box>
