@@ -6,6 +6,7 @@ import type { AgentEvent, EventSink, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 import { costOf, type Usage } from "../util/cost.js";
+import { consumeSpawn } from "../util/spawn-tracker.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
 
@@ -38,6 +39,10 @@ export function startGeminiAdapter(sink: Emit): () => void {
   // filename (sessions share ids across files in theory but filename is a
   // safer dedupe key).
   const emittedIds = new Map<string, Set<string>>();
+  // AUR-200: per-file pending parent agent_call event id, set on the
+  // first sighting of a Gemini session and consumed by the first event
+  // we emit from that file.
+  const pendingParentByFile = new Map<string, string>();
 
   const watcher = chokidar.watch(root, {
     persistent: true,
@@ -67,8 +72,18 @@ export function startGeminiAdapter(sink: Emit): () => void {
     if (!seen) {
       seen = new Set();
       emittedIds.set(file, seen);
+      // AUR-200: first time we see this Gemini session, check if it
+      // was spawned by a `gemini -p ...` call from another agent.
+      // We use empty cwd because Gemini's chat JSON doesn't carry it
+      // (spawn-tracker treats empty as a wildcard, bounded by 60s TTL).
+      const startTime =
+        typeof d.startTime === "string" ? d.startTime : undefined;
+      const spawnTs = startTime ? new Date(startTime).getTime() : Date.now();
+      const parent = consumeSpawn("gemini", "", spawnTs);
+      if (parent) pendingParentByFile.set(file, parent.parentEventId);
     }
 
+    let firstEventEmitted = false;
     for (const m of messages) {
       if (!m || typeof m !== "object") continue;
       const msg = m as Record<string, unknown>;
@@ -77,7 +92,15 @@ export function startGeminiAdapter(sink: Emit): () => void {
       seen.add(id);
 
       const ev = translate(msg, sessionId, kind, project);
-      if (ev) emit(ev);
+      if (ev) {
+        const parent = pendingParentByFile.get(file);
+        if (parent && !firstEventEmitted) {
+          ev.details = { ...(ev.details ?? {}), parentSpawnId: parent };
+          pendingParentByFile.delete(file);
+          firstEventEmitted = true;
+        }
+        emit(ev);
+      }
 
       // Each Gemini assistant message can carry an array of toolCalls,
       // each already including the inline functionResponse. Emit one
