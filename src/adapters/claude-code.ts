@@ -7,6 +7,7 @@ import { clampTs, riskOf } from "../schema.js";
 import { claudeProjectsDir } from "../util/workspace.js";
 import { nextId } from "../util/ids.js";
 import { detectAgentCall } from "../util/agent-call.js";
+import { registerSpawn } from "../util/spawn-tracker.js";
 import { costOf, parseUsage } from "../util/cost.js";
 import { markAgentWrite } from "../util/recent-writes.js";
 
@@ -104,6 +105,18 @@ export function startClaudeAdapter(sink: Emit): () => void {
         const event = translateClaudeLine(obj, sessionId, project, subAgentId);
         if (event) {
           emit(event);
+          // AUR-200: when this event invokes a child agent (codex/gemini/…),
+          // register the spawn so we can chain-link the child session.
+          if (event.details?.agentCall) {
+            const cwd =
+              typeof obj.cwd === "string" ? obj.cwd : "";
+            registerSpawn({
+              parentEventId: event.id,
+              callee: event.details.agentCall.callee,
+              cwd,
+              registeredMs: new Date(event.ts).getTime(),
+            });
+          }
           // Mark attributed writes so the fs-watcher can dedupe.
           if (
             event.path &&
