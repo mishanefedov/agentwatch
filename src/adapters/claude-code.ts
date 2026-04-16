@@ -6,6 +6,7 @@ import type { AgentEvent, EventType, EventSink } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { claudeProjectsDir } from "../util/workspace.js";
 import { nextId } from "../util/ids.js";
+import { detectAgentCall } from "../util/agent-call.js";
 import { costOf, parseUsage } from "../util/cost.js";
 import { markAgentWrite } from "../util/recent-writes.js";
 
@@ -316,6 +317,14 @@ export function translateClaudeLine(
     if (toolUse) {
       const evType = inferToolType(toolUse.name);
       const summary = buildToolSummary(toolUse);
+      // AUR-199: detect when this Bash tool_use is invoking another
+      // agent's CLI (codex exec, gemini -p, claude exec, ollama run …).
+      // The richer agentCall metadata fuels the call-graph view (AUR-201)
+      // and parent-span linkage in the OTel exporter (AUR-202).
+      const agentCall =
+        evType === "shell_exec" && toolUse.cmd
+          ? detectAgentCall(toolUse.cmd)
+          : null;
       return {
         id: nextId(),
         ts,
@@ -324,7 +333,9 @@ export function translateClaudeLine(
         path: toolUse.path,
         cmd: toolUse.cmd,
         tool: toolUse.name,
-        summary: prefix + summary,
+        summary:
+          prefix +
+          (agentCall ? `→ ${agentCall.callee}: ${summary}` : summary),
         sessionId,
         riskScore: riskOf(evType, toolUse.path, toolUse.cmd),
         details: {
@@ -334,6 +345,7 @@ export function translateClaudeLine(
           usage,
           cost,
           model,
+          ...(agentCall ? { agentCall } : {}),
         },
       };
     }
