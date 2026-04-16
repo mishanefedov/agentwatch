@@ -56,6 +56,7 @@ const GROUPS: Group[] = [
       ["t", "token attribution (only inside a scoped session)"],
       ["C", "context compaction visualizer (only inside a scoped session)"],
       ["g", "agent call graph (only inside a scoped session)"],
+      ["S", "scheduled tasks — cron + heartbeat (anywhere)"],
       ["↑↓ / j k inside any view", "scroll"],
     ],
   },

@@ -76,6 +76,25 @@ export interface EventDetails {
    *  Set on the *first* event of the spawned session — descendants
    *  inherit by sessionId. */
   parentSpawnId?: string;
+  /** Marks an event as belonging to a scheduled task — either an
+   *  OpenClaw cron job or a periodic heartbeat run. AUR-204+. */
+  scheduled?: {
+    kind: "cron" | "heartbeat";
+    /** Cron job id from `~/.openclaw/cron/jobs.json` (cron only). */
+    jobId?: string;
+    /** Agent id the job/heartbeat is tied to (`main`, `content`, …). */
+    agentId?: string;
+    /** Human label — job name for cron, task name for heartbeat. */
+    label?: string;
+    /** Freeform schedule string: `every 5m`, a 5-field cron expression,
+     *  or `at <iso>`. Source-of-truth is the openclaw jobs.json. */
+    schedule?: string;
+    /** ms-since-epoch this scheduled instance was supposed to fire. */
+    scheduledAtMs?: number;
+    /** Per-run identifier when the runtime emits one
+     *  (e.g. `cron:<jobId>:run:<runId>`). */
+    runId?: string;
+  };
 }
 
 /** Sink passed to adapters. Adapters emit new events and may later
