@@ -7,6 +7,7 @@ import type { AgentEvent, EventSink, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 import { costOf } from "../util/cost.js";
+import { consumeSpawn } from "../util/spawn-tracker.js";
 
 const BACKFILL_BYTES = 4 * 1024 * 1024;
 
@@ -17,6 +18,8 @@ export function codexSessionsDir(home: string = os.homedir()): string {
 interface Cursor {
   offset: number;
   project: string;
+  /** cwd captured from session_meta — used for AUR-200 spawn linking. */
+  cwd?: string;
   /** Model captured from session_meta / turn_context lines. */
   model?: string;
   /** Event id of the most recently emitted assistant response. */
@@ -26,6 +29,11 @@ interface Cursor {
   /** Pending tool_use events waiting for their function_call_output,
    *  keyed by call_id. Bounded to prevent leaks on malformed sessions. */
   pendingCalls: Map<string, { eventId: string; startMs: number }>;
+  /** Parent agent_call event id, if this Codex session was spawned by
+   *  another agent (Claude's `Bash(codex exec ...)`). Set on session_meta
+   *  via consumeSpawn(); attached to the next emitted event as
+   *  details.parentSpawnId, then cleared. */
+  pendingParentSpawnId?: string;
 }
 
 const MAX_PENDING = 2000;
@@ -80,7 +88,20 @@ export function startCodexAdapter(sink: EventSink): () => void {
         const obj = JSON.parse(line);
         if (obj.type === "session_meta") {
           const cwd = obj.payload?.cwd;
-          if (typeof cwd === "string") cursor!.project = projectOf(cwd);
+          if (typeof cwd === "string") {
+            cursor!.project = projectOf(cwd);
+            cursor!.cwd = cwd;
+            // AUR-200: was this Codex session spawned by a `codex exec`
+            // call from another agent? If so, the next event we emit
+            // should carry the parent linkage.
+            const ts = typeof obj.timestamp === "string" ? obj.timestamp : "";
+            const parent = consumeSpawn(
+              "codex",
+              cwd,
+              ts ? new Date(ts).getTime() : Date.now(),
+            );
+            if (parent) cursor!.pendingParentSpawnId = parent.parentEventId;
+          }
           const model = obj.payload?.model;
           if (typeof model === "string") cursor!.model = model;
           return;
@@ -161,6 +182,15 @@ export function startCodexAdapter(sink: EventSink): () => void {
 
         const event = translate(obj, sessionId, cursor!.project);
         if (event) {
+          // AUR-200: stamp the first event of a spawned session with its
+          // parent agent_call event id, then clear the pending pointer.
+          if (cursor!.pendingParentSpawnId) {
+            event.details = {
+              ...(event.details ?? {}),
+              parentSpawnId: cursor!.pendingParentSpawnId,
+            };
+            cursor!.pendingParentSpawnId = undefined;
+          }
           sink.emit(event);
           if (event.type === "response") cursor!.lastResponseId = event.id;
           // Track function_call events by call_id for later pairing.
