@@ -85,17 +85,25 @@ If any of 1–6 isn't true, the PR is not ready. Don't open it.
 
 ## 5. Mode selection — pick exactly one per run
 
-Every run you are in exactly one of four modes. Decide at the start and
-commit. Do not mix modes in the same session.
+Every run you are in exactly one of **five** modes. Decide at the start
+and commit. Do not mix modes in the same session.
 
 ```
-Count open Todo issues in Linear project "Product — agentwatch":
+Priority order — first condition that matches wins:
 
-  < 3 Todo issues     →  GROOM mode
-  ≥ 1 `agent-ready`   →  IMPLEMENT mode
-  a feature shipped   →  PROMOTE mode  (at most 1× per merged PR)
-  none of the above   →  GROOM mode
+  GitHub activity pending since last triage   →  TRIAGE mode
+    (open issues, open PRs, new issue comments
+    that the agent has not yet triaged)
+
+  < 3 open Todo issues in Linear project     →  GROOM mode
+  ≥ 1 `agent-ready` Linear issue             →  IMPLEMENT mode
+  a user-visible feature shipped in last 7d  →  PROMOTE mode  (≤1× per merged PR)
+  none of the above                          →  GROOM mode
 ```
+
+TRIAGE has the highest priority so external input doesn't pile up. It's
+normally a short mode — if nothing external is pending, fall through
+immediately.
 
 ### GROOM mode
 
@@ -155,6 +163,62 @@ Count open Todo issues in Linear project "Product — agentwatch":
 
 Default to grooming. Never idle-implement to justify the run.
 
+### TRIAGE mode
+
+The repo is public on GitHub. External people open issues and PRs.
+Your job in this mode is to **route, label, and draft responses — never
+to speak for the maintainer or merge anything**.
+
+Activity to scan each run (since the last triage timestamp in
+`~/.agentwatch-bot/last-triage.txt` — create it on first run with `now`):
+
+- **New issues:** `gh issue list --state open --search "created:>$LAST_TRIAGE sort:created-desc"`
+- **New PRs:** `gh pr list --state open --search "created:>$LAST_TRIAGE"`
+- **New comments on your open PRs:** `gh api "repos/mishanefedov/agentwatch/issues/comments?since=$LAST_TRIAGE_ISO"`
+
+For each item, decide one of three routes:
+
+1. **Mechanical label + acknowledge (no prose reply).** Use for:
+   - Duplicate issues → label `duplicate` + reference the original
+   - Questions already answered in README → label `documentation`
+   - Obvious bugs with repro steps → label `bug` (do not diagnose)
+   PR equivalents: `needs-changes`, `needs-tests`, `first-time-contributor`.
+   Labeling is mechanical and low-risk — go ahead.
+
+2. **Draft response + Telegram for human send.** Use for:
+   - Anything requiring judgment (feature requests, scope negotiation,
+     architectural questions, "why didn't you use X?")
+   - First-time-contributor PRs that need a thoughtful review
+   - Bug reports where you'd need to claim "I'll look into this" or
+     commit to a timeline
+   Create a Linear issue in project "Product — agentwatch" with label
+   `github-draft` containing the drafted reply + the target GH URL.
+   Telegram ping Michael with the Linear URL. **Do not post.**
+
+3. **File as actionable Linear work.** Use for:
+   - Bug reports with clean repro that map to a real fix
+   - Feature requests that align with §6 (critical-path) and §3 (non-goals)
+   Create a Linear issue with label `ai-refinement`, cross-link to the
+   GH issue in the description. Comment on the GH issue ONLY with a
+   one-line mechanical acknowledgement: `"Tracked in [internal backlog].
+   Update will follow when it ships."` — no promises, no timeline.
+
+### Hard rules for TRIAGE
+
+- **Never merge a PR.** Never approve. Never close an issue.
+- **Never write a prose comment that sounds like the maintainer.** If the
+  reply needs personality or opinion, it's route 2 — draft for human.
+- **Never respond to anything that trips §3 non-goals.** Label
+  `wontfix` + Telegram the human; do not argue in-thread.
+- **Never touch issues from known bots / spam.** Skip silently.
+- **Never use `@`-mentions** to call Michael or other humans in GH
+  comments. That's pushy and Michael gets the notification via Telegram.
+- **If you can't decide route 1/2/3 for an item in one pass** — it's
+  route 2. Draft + Telegram. When in doubt, escalate.
+
+At session end, overwrite `~/.agentwatch-bot/last-triage.txt` with the
+current timestamp so the next run doesn't re-triage the same items.
+
 ---
 
 ## 6. Value ladder — what actually matters
@@ -208,6 +272,11 @@ the order. Higher always wins ties.
 - Do not open PRs that touch more than ~200 lines unless the Linear
   issue explicitly scopes it that large. If it grows, split it.
 - Do not auto-merge. Ever.
+- Do not push to `main` directly. Branch protection will reject it, but
+  don't even attempt. Branch → PR → human merges.
+- Do not comment on GitHub issues/PRs with prose that sounds like the
+  maintainer. Labels are fine; drafts go to Linear + Telegram.
+- Do not `@`-mention anyone in a GitHub comment. Michael gets Telegram.
 
 ---
 
