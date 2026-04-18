@@ -2,13 +2,16 @@
 
 # agentwatch
 
-**See what every AI coding agent on your machine is doing — in one terminal.**
+**Local observability + control plane for every AI coding agent on your machine.**
 
-Local-only observability for Claude Code, Codex, Gemini CLI, Cursor, and
-OpenClaw — unified timeline, real token + cost accounting, compaction and
-anomaly detection, an MCP server agents can query their own history from,
-and an OpenTelemetry exporter with `gen_ai.*` semantic conventions. All
-local. No cloud. No telemetry. No sign-in.
+A terminal live-tail *and* a browser dashboard — one process, one event
+stream, served from `localhost`. Unified timeline across Claude Code,
+Codex, Gemini CLI, Cursor, Hermes, and OpenClaw. Token + cost accounting,
+compaction + anomaly detection, hybrid search, SVG call graphs,
+monaco-style diff attribution, agent-aware replay ("what would the agent
+say if I edited the prompt?"), policy editor, MCP server agents can query
+their own history from, and an OpenTelemetry exporter with `gen_ai.*`
+semantic conventions. All local. No cloud. No telemetry. No sign-in.
 
 [![npm](https://img.shields.io/npm/v/@misha_misha/agentwatch.svg)](https://www.npmjs.com/package/@misha_misha/agentwatch)
 [![CI](https://github.com/mishanefedov/agentwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/mishanefedov/agentwatch/actions/workflows/ci.yml)
@@ -17,9 +20,27 @@ local. No cloud. No telemetry. No sign-in.
 
 </div>
 
-<div align="center">
-  <img src="./docs/demo.gif" alt="agentwatch demo" width="820" />
-</div>
+```
+$ agentwatch
+┌────────────────────────────────────────────────────────────────────────────┐
+│ agentwatch v0.0.4   events: 1284   web: http://127.0.0.1:3456 [w]          │
+│                                                                            │
+│ 14:51:22  claude-code  tool_call   [auraqu] Edit src/App.tsx     ⚠ 3.4x    │
+│ 14:51:21  claude-code  response    [auraqu] Done. diff at …                │
+│ 14:51:18  hermes       prompt      [agentwatch] reply with single word h…  │
+│ 14:51:15  codex        shell_exec  [auraqu] git status · 8ms               │
+│ …                                                                          │
+│                                                                            │
+│ Agents:  ● Claude Code · ● Codex · ● Gemini · ● Hermes · ● OpenClaw        │
+│                                                                            │
+│ [q] quit  [w] open web UI  [/] filter  [a] agents  [f] cycle  [space] pause│
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**The TUI is the live tail. The web UI is where you drill in** — projects,
+sessions, token charts, compaction sparklines, SVG call graphs, diff
+attribution, replay, anomaly triage, policy editing. Both run in one
+process. Press `w` in the TUI to open the browser.
 
 ---
 
@@ -115,10 +136,17 @@ name was already taken by a CyberArk tool. The installed binary on your
 
 ```bash
 agentwatch doctor   # detects installed agents + readiness
-agentwatch          # launches the TUI
+agentwatch          # TUI live-tail + web UI at http://127.0.0.1:3456
+agentwatch serve    # web UI only (remote boxes / server cron)
 agentwatch mcp      # runs the MCP stdio server (for agents, not humans)
 agentwatch --help
 ```
+
+Flags:
+
+- `--no-web` — TUI only, don't start the web server
+- `--port <n>` / `--host <addr>` — override web server bind
+- `AGENTWATCH_PORT=… AGENTWATCH_HOST=…` — env equivalents
 
 `doctor` output looks like:
 
@@ -129,15 +157,40 @@ agents:
   ● Claude Code        installed (events captured)
   ● Codex              installed (events captured)
   ● Gemini CLI         installed (events captured)
+  ● Hermes Agent       installed (events captured)
   ● Cursor             installed (config-level only)
   ● OpenClaw           installed (events captured)
   ○ Aider              not detected
   ○ Cline (VS Code)    not detected
 ```
 
-Launch the TUI and every event your agents emit streams in. The last 4 MB
-of each active session is backfilled on startup so you have immediate
-context. Press **`?`** to see every hotkey.
+Launch `agentwatch` and every event your agents emit streams in. The TUI
+shows a live tail; the web UI at `http://127.0.0.1:3456` is where you
+drill in — projects, sessions, token charts, SVG call graphs, diff
+attribution, prompt replay, trends. Press `w` in the TUI to open it.
+
+### Web UI map
+
+| Route                                | What it is                                              |
+| ------------------------------------ | ------------------------------------------------------- |
+| `/`                                  | Live timeline (SSE-streamed) with agent + type filters  |
+| `/projects`                          | Grid of detected projects + cost + session counts       |
+| `/projects/:name`                    | Sessions table for one project                          |
+| `/sessions/:id`                      | Chronological event list · export .md / .json           |
+| `/sessions/:id/tokens`               | Stacked-area token chart per turn                       |
+| `/sessions/:id/compaction`           | Context fill % over time + compaction markers           |
+| `/sessions/:id/graph`                | Call graph (d3-hierarchy SVG) — click nodes to drill    |
+| `/sessions/:id/diffs`                | Writes paired with the prompt that triggered them       |
+| `/sessions/:id/replay`               | Edit prompt → re-run the agent in single-turn exec      |
+| `/search`                            | Unified search (live / cross / semantic)                |
+| `/agents`                            | Grid of every supported agent + install status          |
+| `/permissions`                       | Per-agent permission config                             |
+| `/cron`                              | OpenClaw cron jobs + heartbeats                         |
+| `/trends`                            | Cost, cache-hit ratio, events per agent (30d default)   |
+| `/settings/{budgets,anomaly,triggers}` | Form editors for `~/.agentwatch/*.json`                |
+
+`⌘K` / `Ctrl+K` opens the command palette.
+`/` focuses the timeline filter.
 
 ---
 
