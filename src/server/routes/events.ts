@@ -13,27 +13,31 @@ interface EventQuery {
 
 export function registerEventRoutes(app: FastifyInstance, events: AgentEvent[]): void {
   app.get<{ Querystring: EventQuery }>("/api/events", async (req) => {
-    const limit = clamp(parseInt(req.query.limit ?? "100", 10) || 100, 1, 1000);
+    const limit = clamp(parseInt(req.query.limit ?? "100", 10) || 100, 1, 50_000);
     const beforeMs = req.query.before ? Date.parse(req.query.before) : null;
-    let out: AgentEvent[] = events;
-    if (req.query.agent) out = out.filter((e) => e.agent === req.query.agent);
-    if (req.query.session) out = out.filter((e) => e.sessionId === req.query.session);
-    if (req.query.type) out = out.filter((e) => e.type === req.query.type);
-    if (req.query.project) {
-      const pref = `[${req.query.project}`;
-      out = out.filter((e) => (e.summary ?? "").startsWith(pref));
-    }
-    if (beforeMs && !Number.isNaN(beforeMs)) {
-      out = out.filter((e) => new Date(e.ts).getTime() < beforeMs);
-    }
-    if (req.query.q) {
-      const needle = req.query.q.toLowerCase();
-      out = out.filter((e) => matchesLive(e, needle));
+    // Buffer is stored oldest-first for O(1) append. Walk backwards to
+    // build newest-first results without materializing a reversed copy.
+    const out: AgentEvent[] = [];
+    const needle = req.query.q?.toLowerCase();
+    for (let i = events.length - 1; i >= 0 && out.length < limit; i--) {
+      const e = events[i]!;
+      if (req.query.agent && e.agent !== req.query.agent) continue;
+      if (req.query.session && e.sessionId !== req.query.session) continue;
+      if (req.query.type && e.type !== req.query.type) continue;
+      if (req.query.project) {
+        const pref = `[${req.query.project}`;
+        if (!(e.summary ?? "").startsWith(pref)) continue;
+      }
+      if (beforeMs && !Number.isNaN(beforeMs)) {
+        if (new Date(e.ts).getTime() >= beforeMs) continue;
+      }
+      if (needle && !matchesLive(e, needle)) continue;
+      out.push(e);
     }
     return {
-      events: out.slice(0, limit),
+      events: out,
       total: events.length,
-      returned: Math.min(out.length, limit),
+      returned: out.length,
     };
   });
 

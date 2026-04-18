@@ -8,6 +8,11 @@ export function formatDateTime(ts: string): string {
   return ts.slice(0, 19).replace("T", " ");
 }
 
+/** MM-DD HH:MM:SS — compact but unambiguous for a timeline row. */
+export function formatShortDate(ts: string): string {
+  return `${ts.slice(5, 10)} ${ts.slice(11, 19)}`;
+}
+
 export function formatUSD(n: number | undefined | null): string {
   if (n == null) return "—";
   if (n < 0.01) return `$${n.toFixed(4)}`;

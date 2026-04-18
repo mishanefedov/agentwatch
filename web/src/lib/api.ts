@@ -75,11 +75,19 @@ export const api = {
       `/api/sessions/${encodeURIComponent(id)}/graph`,
     ),
 
-  search: (query: string, mode: "live" | "cross" | "semantic" = "live", limit = 100) =>
-    postJson<{ mode: string; hits: Array<any>; status?: string; error?: string }>(
-      "/api/search",
-      { query, mode, limit },
-    ),
+  search: (
+    query: string,
+    mode: "live" | "cross" | "semantic" = "live",
+    limit = 100,
+    opts: { since?: string; until?: string; agents?: string[] } = {},
+  ) =>
+    postJson<{
+      mode: string;
+      hits: Array<any>;
+      status?: string;
+      error?: string;
+      totalScanned?: number;
+    }>("/api/search", { query, mode, limit, ...opts }),
 
   agents: () => getJson<{ agents: DetectedAgent[] }>("/api/agents"),
 

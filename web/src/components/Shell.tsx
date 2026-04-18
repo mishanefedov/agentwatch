@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Activity, Folder, Terminal, Settings, Search, BarChart3, Shield, Clock } from "lucide-react";
+import { Activity, Folder, Terminal, Settings, Search, BarChart3, Shield, Clock, History } from "lucide-react";
 import clsx from "clsx";
 import { useLiveEvents } from "../lib/store";
 import { CommandPalette } from "./CommandPalette";
@@ -25,6 +25,7 @@ export function Shell() {
         </div>
         <nav className="flex items-center gap-1 text-sm">
           <NavItem to="/" label="Timeline" icon={<Activity className="w-4 h-4" />} end />
+          <NavItem to="/logs" label="Logs" icon={<History className="w-4 h-4" />} />
           <NavItem to="/projects" label="Projects" icon={<Folder className="w-4 h-4" />} />
           <NavItem to="/search" label="Search" icon={<Search className="w-4 h-4" />} />
           <NavItem to="/agents" label="Agents" icon={<Terminal className="w-4 h-4" />} />

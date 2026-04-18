@@ -233,13 +233,16 @@ export function startHermesAdapter(sink: Emit): () => void {
   function bootstrap(): void {
     if (!db) return;
     try {
+      // Backfill the most recent N messages so the UI shows hermes
+      // history on boot, same as claude-code/codex/gemini adapters do.
+      // 2000 is enough to cover recent activity without flooding the
+      // ring buffer.
+      const HERMES_BACKFILL = 2_000;
       const row = db.prepare("SELECT COALESCE(MAX(id), 0) AS mx FROM messages").get() as { mx: number } | undefined;
-      lastMessageId = row?.mx ?? 0;
-      const seed = db.prepare("SELECT id, ended_at FROM sessions").all() as Array<{ id: string; ended_at: number | null }>;
-      for (const s of seed) {
-        seenSessionIds.add(s.id);
-        if (s.ended_at === null) openSessionIds.add(s.id);
-      }
+      const maxId = row?.mx ?? 0;
+      lastMessageId = Math.max(0, maxId - HERMES_BACKFILL);
+      // Don't pre-seed seenSessionIds — let the first poll emit
+      // session_start for each so they show up in the timeline too.
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[agentwatch] hermes bootstrap failed:", err);

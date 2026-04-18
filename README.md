@@ -20,22 +20,9 @@ semantic conventions. All local. No cloud. No telemetry. No sign-in.
 
 </div>
 
-```
-$ agentwatch
-┌────────────────────────────────────────────────────────────────────────────┐
-│ agentwatch v0.0.4   events: 1284   web: http://127.0.0.1:3456 [w]          │
-│                                                                            │
-│ 14:51:22  claude-code  tool_call   [auraqu] Edit src/App.tsx     ⚠ 3.4x    │
-│ 14:51:21  claude-code  response    [auraqu] Done. diff at …                │
-│ 14:51:18  hermes       prompt      [agentwatch] reply with single word h…  │
-│ 14:51:15  codex        shell_exec  [auraqu] git status · 8ms               │
-│ …                                                                          │
-│                                                                            │
-│ Agents:  ● Claude Code · ● Codex · ● Gemini · ● Hermes · ● OpenClaw        │
-│                                                                            │
-│ [q] quit  [w] open web UI  [/] filter  [a] agents  [f] cycle  [space] pause│
-└────────────────────────────────────────────────────────────────────────────┘
-```
+<div align="center">
+  <img src="./docs/timeline.png" alt="agentwatch web UI — unified timeline across 5 agents, each in its own workspace" width="1100" />
+</div>
 
 **The TUI is the live tail. The web UI is where you drill in** — projects,
 sessions, token charts, compaction sparklines, SVG call graphs, diff

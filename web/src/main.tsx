@@ -12,6 +12,7 @@ import { SearchPage } from "./routes/Search";
 import { AgentsPage } from "./routes/Agents";
 import { PermissionsPage } from "./routes/Permissions";
 import { CronPage } from "./routes/Cron";
+import { LogsPage } from "./routes/Logs";
 import "./index.css";
 
 // Code-split the heavy/rarely-visited pages (recharts + diff viewer +
@@ -55,6 +56,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="sessions/:id/replay" element={L(<SessionReplayPage />)} />
             <Route path="events/:id" element={<EventDetailPage />} />
             <Route path="search" element={<SearchPage />} />
+            <Route path="logs" element={<LogsPage />} />
             <Route path="agents" element={<AgentsPage />} />
             <Route path="permissions" element={<PermissionsPage />} />
             <Route path="cron" element={<CronPage />} />

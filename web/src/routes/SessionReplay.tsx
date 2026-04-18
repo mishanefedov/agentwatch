@@ -19,7 +19,8 @@ export function SessionReplayPage() {
 
   useEffect(() => {
     if (!q.data) return;
-    const firstPromptEv = q.data.events.slice().reverse().find((e: any) => e.type === "prompt");
+    // Events arrive oldest-first; first prompt = first match.
+    const firstPromptEv = q.data.events.find((e: any) => e.type === "prompt");
     const original = firstPromptEv?.details?.fullText ?? firstPromptEv?.summary ?? "";
     if (original && !prompt) setPrompt(original);
   }, [q.data]);
