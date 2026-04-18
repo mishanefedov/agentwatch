@@ -98,6 +98,7 @@ across all of them.
 | Codex coverage                               | ❌                      | ✅ tokens + tools + cost + compaction |
 | Gemini CLI coverage                          | ❌                      | ✅ tokens + tools + cost              |
 | OpenClaw coverage                            | ❌                      | ✅ tokens + cost                      |
+| Hermes Agent coverage                        | ❌                      | ✅ tokens + tools + cost (SQLite)     |
 | Cursor coverage                              | ❌                      | 🟡 config level                       |
 | Per-agent budget alarms                      | ❌                      | ✅ session + daily caps                |
 | Statistical anomaly detection (loops / spikes) | rule-based only      | ✅ MAD z-score + period-1-to-4 loops  |
@@ -200,21 +201,22 @@ What actually works per agent, as of v0.0.3. Features not listed here
 work across every agent (timeline, export, syntax highlighting, notifications,
 triggers, search, stale detection, clipboard yank).
 
-| Feature                        | Claude Code | Codex | Gemini CLI | Cursor | OpenClaw |
-| ------------------------------ | :---------: | :---: | :--------: | :----: | :------: |
-| Live events on timeline        | ✅          | ✅    | ✅         | 🟡     | ✅       |
-| Token usage + cost             | ✅          | ✅    | ✅         | ❌     | ✅       |
-| Tool call + result pairing     | ✅          | ✅    | ✅         | ❌     | 🟡       |
-| Per-turn token attribution     | ✅          | ✅    | ✅         | ❌     | ✅       |
-| Budget alarms (session + day)  | ✅          | ✅    | ✅         | ❌     | ✅       |
-| Anomaly detection (cost/loops) | ✅          | ✅    | ✅         | 🟡     | ✅       |
-| Compaction visualizer          | ✅          | ✅    | ❌         | —      | ❌       |
-| Permissions view               | ✅          | ✅    | ✅         | ✅     | ✅       |
-| Cross-session search           | ✅          | ✅    | ✅         | ❌     | ❌       |
-| Subagent drilldown             | ✅          | —     | 🟡         | —      | 🟡       |
-| Agent memory file overhead     | `CLAUDE.md` | `AGENTS.md` | `GEMINI.md` | `.cursorrules` | `OPENCLAW.md` |
-| OTel span coverage             | ✅          | ✅    | ✅         | 🟡     | ✅       |
-| MCP server exposes history     | ✅          | ✅    | ✅ (raw)   | ❌     | ❌       |
+| Feature                        | Claude Code | Codex | Gemini CLI | Cursor | OpenClaw | Hermes |
+| ------------------------------ | :---------: | :---: | :--------: | :----: | :------: | :----: |
+| Live events on timeline        | ✅          | ✅    | ✅         | 🟡     | ✅       | ✅     |
+| Token usage + cost             | ✅          | ✅    | ✅         | ❌     | ✅       | ✅     |
+| Tool call + result pairing     | ✅          | ✅    | ✅         | ❌     | 🟡       | ✅     |
+| Per-turn token attribution     | ✅          | ✅    | ✅         | ❌     | ✅       | ✅     |
+| Budget alarms (session + day)  | ✅          | ✅    | ✅         | ❌     | ✅       | ✅     |
+| Anomaly detection (cost/loops) | ✅          | ✅    | ✅         | 🟡     | ✅       | ✅     |
+| Compaction visualizer          | ✅          | ✅    | ❌         | —      | ❌       | ❌     |
+| Permissions view               | ✅          | ✅    | ✅         | ✅     | ✅       | —      |
+| Cross-session search           | ✅          | ✅    | ✅         | ❌     | ❌       | 🟡     |
+| Subagent drilldown             | ✅          | —     | 🟡         | —      | 🟡       | 🟡     |
+| Replay (agent-aware exec)      | ✅          | ✅    | ✅         | ❌     | ❌       | ✅     |
+| Agent memory file overhead     | `CLAUDE.md` | `AGENTS.md` | `GEMINI.md` | `.cursorrules` | `OPENCLAW.md` | `SOUL.md` |
+| OTel span coverage             | ✅          | ✅    | ✅         | 🟡     | ✅       | 🟡     |
+| MCP server exposes history     | ✅          | ✅    | ✅ (raw)   | ❌     | ❌       | ❌     |
 
 - **Cursor** exposes config state (MCP servers, `.cursorrules`, approval
   mode, sandbox) but its actual AI activity lives in a SQLite database we
@@ -223,6 +225,12 @@ triggers, search, stale detection, clipboard yank).
   compaction detection is Claude + Codex only.
 - **OpenClaw** doesn't persist tool_result content or compaction markers
   to its JSONL — structural limit of what's on disk, not an adapter gap.
+- **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** (by
+  Nous Research — the OpenClaw successor with a closed learning loop)
+  persists sessions to `~/.hermes/state.db` (SQLite + FTS5). The adapter
+  polls the DB over chokidar + 2s safety-net and emits the full
+  session/prompt/response/tool-call stream. Replay re-runs single turns
+  via `hermes chat -q <prompt> -Q --max-turns 1`.
 
 ---
 
