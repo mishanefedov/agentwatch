@@ -12,6 +12,16 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} on ${path}`);
+  return (await res.json()) as T;
+}
+
 export const api = {
   health: () => getJson<{ ok: boolean; version: string }>("/api/health"),
 
@@ -53,6 +63,22 @@ export const api = {
   sessionTokens: (id: string) =>
     getJson<{ sessionId: string; breakdown: any; turns: any[] }>(
       `/api/sessions/${encodeURIComponent(id)}/tokens`,
+    ),
+
+  sessionCompaction: (id: string) =>
+    getJson<{ sessionId: string; series: any }>(
+      `/api/sessions/${encodeURIComponent(id)}/compaction`,
+    ),
+
+  sessionGraph: (id: string) =>
+    getJson<{ sessionId: string; graph: any }>(
+      `/api/sessions/${encodeURIComponent(id)}/graph`,
+    ),
+
+  search: (query: string, mode: "live" | "cross" | "semantic" = "live", limit = 100) =>
+    postJson<{ mode: string; hits: Array<any>; status?: string; error?: string }>(
+      "/api/search",
+      { query, mode, limit },
     ),
 
   agents: () => getJson<{ agents: DetectedAgent[] }>("/api/agents"),

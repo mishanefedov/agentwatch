@@ -11,6 +11,7 @@ import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerPermissionRoutes } from "./routes/permissions.js";
 import { registerCronRoutes } from "./routes/cron.js";
+import { registerSearchRoutes } from "./routes/search.js";
 
 export interface ServerHandle {
   url: string;
@@ -94,6 +95,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   registerAgentRoutes(app, opts.events);
   registerPermissionRoutes(app);
   registerCronRoutes(app, opts.events);
+  registerSearchRoutes(app, opts.events);
 
   // Static web bundle (if built).
   const webDist = resolveWebDist();
