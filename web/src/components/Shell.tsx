@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { Activity, Folder, Terminal, Settings, Search, BarChart3, Shield, Clock } from "lucide-react";
 import clsx from "clsx";
 import { useLiveEvents } from "../lib/store";
+import { CommandPalette } from "./CommandPalette";
 
 export function Shell() {
   useLiveEvents(); // subscribes to SSE on mount; store drives the Timeline
@@ -33,6 +34,7 @@ export function Shell() {
           <NavItem to="/settings" label="Settings" icon={<Settings className="w-4 h-4" />} />
         </nav>
         <div className="ml-auto flex items-center gap-3 text-xs text-fg-dim">
+          <kbd className="border border-bg-border rounded px-1.5 py-0.5 mono text-[10px]">⌘K</kbd>
           <span className={clsx("w-2 h-2 rounded-full", health.isSuccess ? "bg-ok" : "bg-warn")} />
           <span>{health.isSuccess ? "connected" : "connecting…"}</span>
         </div>
@@ -40,6 +42,7 @@ export function Shell() {
       <main className="flex-1 overflow-hidden">
         <Outlet />
       </main>
+      <CommandPalette />
     </div>
   );
 }
