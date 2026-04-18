@@ -15,6 +15,7 @@ interface Item {
 
 const NAV_ITEMS: Item[] = [
   { id: "nav:timeline", title: "Timeline", to: "/", group: "nav" },
+  { id: "nav:logs", title: "Logs (disk-backed history)", to: "/logs", group: "nav" },
   { id: "nav:projects", title: "Projects", to: "/projects", group: "nav" },
   { id: "nav:search", title: "Search", to: "/search", group: "nav" },
   { id: "nav:agents", title: "Agents", to: "/agents", group: "nav" },

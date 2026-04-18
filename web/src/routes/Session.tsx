@@ -18,9 +18,9 @@ export function SessionPage() {
   if (q.error) return <div className="p-6 text-danger">{String(q.error)}</div>;
 
   const events: AgentEvent[] = q.data?.events ?? [];
-  // Events come newest-first from the store; we want the session view
-  // in chronological order (top = start of session).
-  const ordered = [...events].reverse();
+  // Server now returns session events oldest-first directly — chronological
+  // order is what we want for a session playback view.
+  const ordered = events;
 
   return (
     <div className="h-full flex flex-col">

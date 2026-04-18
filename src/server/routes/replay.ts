@@ -62,10 +62,8 @@ export function registerReplayRoutes(app: FastifyInstance, events: AgentEvent[])
         return { error: `replay not supported for agent "${agent}" yet` };
       }
 
-      // Original prompt = nearest 'prompt' event (newest first in store
-      // means we sort chronologically first).
-      const chronological = sessionEvents.slice().reverse();
-      const firstPrompt = chronological.find((e) => e.type === "prompt");
+      // Original prompt = first 'prompt' event (events are oldest-first).
+      const firstPrompt = sessionEvents.find((e) => e.type === "prompt");
       const originalPrompt = firstPrompt?.details?.fullText ?? firstPrompt?.summary ?? "";
       const prompt = (req.body?.prompt ?? originalPrompt).trim();
       if (!prompt) {

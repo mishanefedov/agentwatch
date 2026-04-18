@@ -2,22 +2,29 @@ import type { FastifyInstance } from "fastify";
 import type { AgentEvent } from "../../schema.js";
 import { detectAgents } from "../../adapters/detect.js";
 
-export function registerAgentRoutes(app: FastifyInstance, events: AgentEvent[]): void {
+export function registerAgentRoutes(
+  app: FastifyInstance,
+  _events: AgentEvent[],
+  byAgent: Map<string, AgentEvent[]>,
+): void {
   app.get("/api/agents", async () => {
     const agents = detectAgents();
-    const counts = new Map<string, { total: number; lastTs?: string }>();
-    for (const e of events) {
-      const c = counts.get(e.agent) ?? { total: 0 };
-      c.total += 1;
-      if (!c.lastTs || e.ts > c.lastTs) c.lastTs = e.ts;
-      counts.set(e.agent, c);
-    }
     return {
-      agents: agents.map((a) => ({
-        ...a,
-        eventCount: counts.get(a.name)?.total ?? 0,
-        lastEventAt: counts.get(a.name)?.lastTs ?? null,
-      })),
+      agents: agents.map((a) => {
+        const bucket = byAgent.get(a.name);
+        // Buckets are insertion-order; the max ts may be anywhere
+        // inside (adapter backfill can replay old and new session
+        // files interleaved). Walk to find it.
+        let maxTs: string | null = null;
+        if (bucket) {
+          for (const e of bucket) if (!maxTs || e.ts > maxTs) maxTs = e.ts;
+        }
+        return {
+          ...a,
+          eventCount: bucket?.length ?? 0,
+          lastEventAt: maxTs,
+        };
+      }),
     };
   });
 }

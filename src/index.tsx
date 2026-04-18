@@ -95,24 +95,24 @@ if (arg === "serve") {
   );
   const { detectWorkspaceRoot } = await import("./util/workspace.js");
   const { clampTs } = await import("./schema.js");
-  const events: Array<import("./schema.js").AgentEvent> = [];
-  const MAX_EVENTS = 2000;
   const workspace = detectWorkspaceRoot();
   const host = parseFlag("--host") ?? process.env.AGENTWATCH_HOST ?? "127.0.0.1";
   const port = Number(parseFlag("--port") ?? process.env.AGENTWATCH_PORT ?? 3456);
-  const server = await startServer({ host, port, events });
+  const { addEventToServer } = await import("./server/index.js");
+  const server = await startServer({ host, port });
   const sink = {
     emit: (e: import("./schema.js").AgentEvent) => {
-      // Normalize ts and dedupe newest-first.
       e.ts = clampTs(e.ts);
-      events.unshift(e);
-      if (events.length > MAX_EVENTS) events.length = MAX_EVENTS;
+      addEventToServer(server, e);
       server.broadcaster.emitEvent(e);
     },
     enrich: (eventId: string, patch: Partial<import("./schema.js").EventDetails>) => {
-      const target = events.find((x) => x.id === eventId);
-      if (target) {
-        target.details = { ...(target.details ?? {}), ...patch };
+      for (const bucket of server.byAgent.values()) {
+        const target = bucket.find((x) => x.id === eventId);
+        if (target) {
+          target.details = { ...(target.details ?? {}), ...patch };
+          break;
+        }
       }
       server.broadcaster.emitEnrich(eventId, patch);
     },
