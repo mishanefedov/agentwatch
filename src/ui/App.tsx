@@ -68,6 +68,8 @@ import {
   reducer,
   type Action,
 } from "./state.js";
+import { startServer, type ServerHandle } from "../server/index.js";
+import { openUrl } from "../util/open-url.js";
 
 
 export function App() {
@@ -83,6 +85,38 @@ export function App() {
   );
   const { stdout } = useStdout();
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
+  const [server, setServer] = useState<ServerHandle | null>(null);
+  const noWeb = process.argv.includes("--no-web");
+
+  // Server lifecycle — started once, lives as long as the TUI does.
+  useEffect(() => {
+    if (noWeb) return;
+    const events: AgentEvent[] = [];
+    const port = Number(
+      findFlag("--port") ?? process.env.AGENTWATCH_PORT ?? 3456,
+    );
+    const host = findFlag("--host") ?? process.env.AGENTWATCH_HOST ?? "127.0.0.1";
+    let handle: ServerHandle | null = null;
+    let cancelled = false;
+    startServer({ host, port, events })
+      .then((h) => {
+        if (cancelled) {
+          void h.stop();
+          return;
+        }
+        handle = h;
+        setServer(h);
+      })
+      .catch((err) => {
+        // Port busy or similar. Don't crash the TUI — it still works.
+        // eslint-disable-next-line no-console
+        console.error(`[agentwatch] web server failed to start: ${String(err)}`);
+      });
+    return () => {
+      cancelled = true;
+      if (handle) void handle.stop();
+    };
+  }, []);
 
   useEffect(() => {
     const stopTriggersWatch = watchTriggers();
@@ -115,6 +149,12 @@ export function App() {
           setTimeout(flush, FLUSH_MS);
         }
         emitEventSpan(e);
+        // Share with the web server (newest-first) + broadcast over SSE.
+        if (server) {
+          server.events.unshift(e);
+          if (server.events.length > 2000) server.events.length = 2000;
+          server.broadcaster.emitEvent(e);
+        }
         const eventMs = new Date(e.ts).getTime();
         if (eventMs < launchedAt) return;
         const alert = shouldNotify(e);
@@ -122,6 +162,11 @@ export function App() {
       },
       enrich: (eventId: string, patch: Partial<EventDetails>) => {
         dispatch({ type: "enrich", eventId, patch });
+        if (server) {
+          const target = server.events.find((x) => x.id === eventId);
+          if (target) target.details = { ...(target.details ?? {}), ...patch };
+          server.broadcaster.emitEnrich(eventId, patch);
+        }
       },
     };
     const adapters = startAllAdapters(sink, workspace);
@@ -133,7 +178,7 @@ export function App() {
       stopAllAdapters(adapters);
       stopTriggersWatch();
     };
-  }, [workspace]);
+  }, [workspace, server]);
 
   const agentFiltered = state.filterAgent
     ? state.events.filter((e) => e.agent === state.filterAgent)
@@ -648,6 +693,11 @@ export function App() {
         dispatch({ type: "tokens-move", delta: -1, max });
       }
     }
+    if (input === "w" && server) {
+      openUrl(server.url);
+      dispatch({ type: "flash", text: `→ opening ${server.url}` });
+      setTimeout(() => dispatch({ type: "flash-clear" }), 2000);
+    }
     if (input === "0") dispatch({ type: "home" });
     if (input === "P") dispatch({ type: "toggle-projects" });
     if (input === "A") {
@@ -697,6 +747,7 @@ export function App() {
         budget={budgetStatus}
         anomalies={bannerSuppressed ? undefined : anomalies}
         sessionAnomalies={bannerSuppressed ? [] : sessionSummaries}
+        webUrl={server?.url}
       />
       <Breadcrumb
         projectFilter={state.projectFilter}
@@ -892,6 +943,13 @@ function runUnifiedSearch(
     return;
   }
   void runSemanticSearchUnified(query, dispatch);
+}
+
+function findFlag(name: string): string | undefined {
+  const idx = process.argv.indexOf(name);
+  if (idx === -1) return undefined;
+  const val = process.argv[idx + 1];
+  return val && !val.startsWith("--") ? val : undefined;
 }
 
 function matchesLive(e: AgentEvent, needle: string): boolean {

@@ -12,6 +12,7 @@ interface Props {
   budget?: BudgetStatus;
   anomalies?: Map<string, AnomalyFlag[]>;
   sessionAnomalies?: SessionAnomalySummary[];
+  webUrl?: string;
 }
 
 export type { Props as HeaderProps };
@@ -24,6 +25,7 @@ export function Header({
   budget,
   anomalies,
   sessionAnomalies,
+  webUrl,
 }: Props) {
   const breached = budget?.breachedSession || budget?.dayBreach;
   const anomalyMessages = summarizeAnomalies(anomalies);
@@ -50,6 +52,13 @@ export function Header({
             <>
               <Text dimColor>  </Text>
               <Text color="red">[PAUSED]</Text>
+            </>
+          )}
+          {webUrl && (
+            <>
+              <Text dimColor>  web: </Text>
+              <Text color="cyan">{webUrl}</Text>
+              <Text dimColor> [w]</Text>
             </>
           )}
         </Text>

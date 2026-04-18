@@ -17,11 +17,16 @@ if (arg === "--help" || arg === "-h") {
   console.log(`agentwatch — local observability for AI coding agents
 
 Usage:
-  agentwatch          launch the TUI
-  agentwatch doctor   detect installed agents and print readiness
-  agentwatch mcp      run as an MCP server over stdio (for agents to query
-                      their own history — add to Claude/Cursor MCP config)
-  agentwatch --help   show this help
+  agentwatch                launch the TUI + web UI (http://127.0.0.1:3456)
+  agentwatch serve          run only the web server (no TUI, for remote boxes)
+  agentwatch doctor         detect installed agents and print readiness
+  agentwatch mcp            run as an MCP server over stdio
+  agentwatch --help         show this help
+
+Flags:
+  --no-web                  TUI only, don't start the web server
+  --port <n>                web server port (default 3456)
+  --host <addr>             web server bind address (default 127.0.0.1)
 
 Hotkeys inside the TUI:
   q       quit
@@ -29,9 +34,12 @@ Hotkeys inside the TUI:
   f       cycle agent filter
   p       pause / resume event stream
   c       clear events
+  w       open web UI in browser
 
 Environment:
-  WORKSPACE_ROOT  override the detected workspace root
+  WORKSPACE_ROOT   override the detected workspace root
+  AGENTWATCH_PORT  override the web server port
+  AGENTWATCH_HOST  override the web server bind address
 `);
   process.exit(0);
 }
@@ -40,8 +48,6 @@ if (arg === "mcp") {
   try {
     const { runMcpServer } = await import("./mcp/server.js");
     await runMcpServer();
-    // Transport keeps the event loop alive via stdin; don't exit here.
-    // It returns when the client disconnects (closes stdin).
     await new Promise<void>((resolve) => {
       process.stdin.on("end", resolve);
       process.stdin.on("close", resolve);
@@ -76,13 +82,56 @@ if (arg === "doctor") {
     for (const a of notInstrumented) {
       console.log(`  - ${a.label}`);
     }
-    console.log("");
-    console.log(
-      "If you want events captured for these, open an issue with a redacted session file:",
-    );
-    console.log("  https://github.com/mishanefedov/agentwatch/issues/new");
   }
   process.exit(0);
+}
+
+/** Headless mode — start the web server + adapters but no TUI. Useful for
+ *  running on a cloud box and pointing your browser at it over LAN. */
+if (arg === "serve") {
+  const { startServer } = await import("./server/index.js");
+  const { startAllAdapters, stopAllAdapters } = await import(
+    "./adapters/registry.js"
+  );
+  const { detectWorkspaceRoot } = await import("./util/workspace.js");
+  const { clampTs } = await import("./schema.js");
+  const events: Array<import("./schema.js").AgentEvent> = [];
+  const MAX_EVENTS = 2000;
+  const workspace = detectWorkspaceRoot();
+  const host = parseFlag("--host") ?? process.env.AGENTWATCH_HOST ?? "127.0.0.1";
+  const port = Number(parseFlag("--port") ?? process.env.AGENTWATCH_PORT ?? 3456);
+  const server = await startServer({ host, port, events });
+  const sink = {
+    emit: (e: import("./schema.js").AgentEvent) => {
+      // Normalize ts and dedupe newest-first.
+      e.ts = clampTs(e.ts);
+      events.unshift(e);
+      if (events.length > MAX_EVENTS) events.length = MAX_EVENTS;
+      server.broadcaster.emitEvent(e);
+    },
+    enrich: (eventId: string, patch: Partial<import("./schema.js").EventDetails>) => {
+      const target = events.find((x) => x.id === eventId);
+      if (target) {
+        target.details = { ...(target.details ?? {}), ...patch };
+      }
+      server.broadcaster.emitEnrich(eventId, patch);
+    },
+  };
+  const adapters = startAllAdapters(sink, workspace);
+  process.stderr.write(`[agentwatch] serving ${server.url}\n`);
+  process.on("SIGINT", async () => {
+    stopAllAdapters(adapters);
+    await server.stop();
+    process.exit(0);
+  });
+  await new Promise(() => undefined);
+}
+
+function parseFlag(name: string): string | undefined {
+  const idx = process.argv.indexOf(name);
+  if (idx === -1) return undefined;
+  const val = process.argv[idx + 1];
+  return val && !val.startsWith("--") ? val : undefined;
 }
 
 enterAltScreen();
