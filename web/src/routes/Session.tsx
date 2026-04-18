@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { agentColor, formatTime, riskClass, typeIcon } from "../lib/format";
-import { ArrowLeft, Download } from "lucide-react";
+import { ArrowLeft, Download, BarChart3, Activity, GitBranch } from "lucide-react";
 import clsx from "clsx";
 import type { AgentEvent } from "../lib/types";
 
@@ -31,14 +31,23 @@ export function SessionPage() {
         <h1 className="text-lg font-bold mono">session:{id.slice(0, 16)}</h1>
         <span className={clsx("text-sm", agentColor(q.data?.agent as any))}>{q.data?.agent}</span>
         <span className="text-sm text-fg-dim">{events.length} events</span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
+          <Link to={`/sessions/${encodeURIComponent(id)}/tokens`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
+            <BarChart3 className="w-3.5 h-3.5" /> tokens
+          </Link>
+          <Link to={`/sessions/${encodeURIComponent(id)}/compaction`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
+            <Activity className="w-3.5 h-3.5" /> compaction
+          </Link>
+          <Link to={`/sessions/${encodeURIComponent(id)}/graph`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
+            <GitBranch className="w-3.5 h-3.5" /> graph
+          </Link>
           <a
             href={`/api/sessions/${encodeURIComponent(id)}/export?format=md&inline=1`}
             target="_blank"
             rel="noreferrer"
             className="text-xs text-fg-dim hover:text-accent flex items-center gap-1"
           >
-            <Download className="w-3.5 h-3.5" /> export .md
+            <Download className="w-3.5 h-3.5" /> .md
           </a>
           <a
             href={`/api/sessions/${encodeURIComponent(id)}/export?format=json&inline=1`}
@@ -46,7 +55,7 @@ export function SessionPage() {
             rel="noreferrer"
             className="text-xs text-fg-dim hover:text-accent flex items-center gap-1"
           >
-            <Download className="w-3.5 h-3.5" /> export .json
+            <Download className="w-3.5 h-3.5" /> .json
           </a>
         </div>
       </div>
