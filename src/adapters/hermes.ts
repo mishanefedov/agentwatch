@@ -77,6 +77,16 @@ export interface HermesSession {
   estimated_cost_usd: number | null;
 }
 
+function resolveHermesDbPath(): string {
+  // Explicit override wins (useful for tests + non-standard installs).
+  const explicit = process.env.HERMES_DB_PATH?.trim();
+  if (explicit && explicit.length > 0) return explicit;
+  // Match hermes's own convention: HERMES_HOME → $HERMES_HOME/state.db.
+  const hermesHome = process.env.HERMES_HOME?.trim();
+  const base = hermesHome && hermesHome.length > 0 ? hermesHome : join(homedir(), ".hermes");
+  return join(base, "state.db");
+}
+
 const DEFAULT_DB_PATH = join(homedir(), ".hermes", "state.db");
 
 export function translateHermesSessionStart(s: HermesSession, source: string): AgentEvent {
@@ -195,7 +205,7 @@ function hermesSummaryFor(type: EventType, m: HermesMessage, toolName?: string):
 
 export function startHermesAdapter(sink: Emit): () => void {
   const emit = typeof sink === "function" ? sink : sink.emit;
-  const dbPath = process.env.HERMES_DB_PATH ?? DEFAULT_DB_PATH;
+  const dbPath = resolveHermesDbPath();
 
   // Hermes isn't installed → silent no-op (same convention as openclaw
   // when ~/.openclaw doesn't exist).
@@ -291,15 +301,17 @@ export function startHermesAdapter(sink: Emit): () => void {
 
   pollAndEmit();
 
+  // Watch the db + WAL sidecar. No awaitWriteFinish — we're polling SQLite,
+  // not reading file bytes, so we don't need the file to be "stable" before
+  // firing. fsevents is also slow for SQLite WAL writes (the main .db
+  // mtime only moves on checkpoint), so the 2s safety-net poll below is
+  // the real latency ceiling users see.
   const watchPaths = [dbPath, dbPath + "-wal"];
-  const watcher = chokidar.watch(watchPaths, {
-    ignoreInitial: true,
-    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
-  });
+  const watcher = chokidar.watch(watchPaths, { ignoreInitial: true });
   watcher.on("change", () => pollAndEmit());
   watcher.on("add", () => pollAndEmit());
 
-  const poller = setInterval(() => pollAndEmit(), 10_000);
+  const poller = setInterval(() => pollAndEmit(), 2_000);
 
   return (): void => {
     closed = true;

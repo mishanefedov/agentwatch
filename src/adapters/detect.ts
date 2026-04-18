@@ -13,6 +13,12 @@ export interface DetectedAgent {
   instrumented?: boolean;
 }
 
+function hermesStateDb(home: string): string {
+  const override = process.env.HERMES_HOME?.trim();
+  const base = override && override.length > 0 ? override : join(home, ".hermes");
+  return join(base, "state.db");
+}
+
 export function detectAgents(): DetectedAgent[] {
   const home = homedir();
   const os = platform();
@@ -68,6 +74,13 @@ export function detectAgents(): DetectedAgent[] {
       label: "Codex",
       configPath: join(home, ".codex", "sessions"),
       present: existsSync(join(home, ".codex")),
+      instrumented: true,
+    },
+    {
+      name: "hermes",
+      label: "Hermes Agent",
+      configPath: hermesStateDb(home),
+      present: existsSync(hermesStateDb(home)),
       instrumented: true,
     },
     {
