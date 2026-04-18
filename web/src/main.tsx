@@ -15,6 +15,10 @@ import { SessionGraphPage } from "./routes/SessionGraph";
 import { PermissionsPage } from "./routes/Permissions";
 import { CronPage } from "./routes/Cron";
 import { AgentsPage } from "./routes/Agents";
+import { TrendsPage } from "./routes/Trends";
+import { SessionDiffsPage } from "./routes/SessionDiffs";
+import { SessionReplayPage } from "./routes/SessionReplay";
+import { SettingsShell, BudgetsSettings, AnomalySettings, TriggersSettings } from "./routes/Settings";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -36,11 +40,20 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="sessions/:id/tokens" element={<SessionTokensPage />} />
             <Route path="sessions/:id/compaction" element={<SessionCompactionPage />} />
             <Route path="sessions/:id/graph" element={<SessionGraphPage />} />
+            <Route path="sessions/:id/diffs" element={<SessionDiffsPage />} />
+            <Route path="sessions/:id/replay" element={<SessionReplayPage />} />
             <Route path="events/:id" element={<EventDetailPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="agents" element={<AgentsPage />} />
             <Route path="permissions" element={<PermissionsPage />} />
             <Route path="cron" element={<CronPage />} />
+            <Route path="trends" element={<TrendsPage />} />
+            <Route path="settings" element={<SettingsShell />}>
+              <Route index element={<Navigate to="budgets" replace />} />
+              <Route path="budgets" element={<BudgetsSettings />} />
+              <Route path="anomaly" element={<AnomalySettings />} />
+              <Route path="triggers" element={<TriggersSettings />} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

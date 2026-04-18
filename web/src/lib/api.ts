@@ -86,6 +86,53 @@ export const api = {
   permissions: () => getJson<any>("/api/permissions"),
 
   cron: () => getJson<{ jobs: any[]; heartbeats: any[]; scheduledEvents: AgentEvent[] }>("/api/cron"),
+
+  config: (kind: "budgets" | "anomaly" | "triggers") =>
+    getJson<{ kind: string; path: string; value: any; defaults: any }>(`/api/config/${kind}`),
+
+  saveConfig: async (kind: "budgets" | "anomaly" | "triggers", value: unknown) => {
+    const r = await fetch(`/api/config/${kind}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(value),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error ?? r.statusText);
+    return j;
+  },
+
+  trendsCost: (days = 30) =>
+    getJson<{ days: number; data: Array<{ day: string; cost: number; input: number; output: number }> }>(
+      `/api/trends/cost?days=${days}`,
+    ),
+
+  trendsCacheHit: (days = 30) =>
+    getJson<{ days: number; data: Array<{ day: string; cacheRead: number; cacheCreate: number; totalInput: number; hitRatio: number }> }>(
+      `/api/trends/cache-hit?days=${days}`,
+    ),
+
+  trendsByAgent: (days = 30) =>
+    getJson<{ days: number; agents: string[]; data: Array<Record<string, any>> }>(
+      `/api/trends/by-agent?days=${days}`,
+    ),
+
+  sessionDiffs: (id: string) =>
+    getJson<{ sessionId: string; diffs: Array<any>; count: number }>(
+      `/api/sessions/${encodeURIComponent(id)}/diffs`,
+    ),
+
+  replay: (id: string, body: { prompt?: string; binaryPath?: string; timeoutSec?: number }) =>
+    postJson<{
+      ok: boolean;
+      exitCode?: number;
+      agent: string;
+      prompt: string;
+      command: string;
+      durationMs: number;
+      stdout: string;
+      stderr: string;
+      error?: string;
+    }>(`/api/sessions/${encodeURIComponent(id)}/replay`, body),
 };
 
 /** Subscribe to the live event stream. Returns an unsubscribe fn. */
