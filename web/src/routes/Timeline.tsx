@@ -6,26 +6,17 @@ import type { AgentEvent, AgentName, EventType } from "../lib/types";
 import { Search, Filter } from "lucide-react";
 import clsx from "clsx";
 
-const AGENT_FILTERS: Array<AgentName | "all"> = [
-  "all",
-  "claude-code",
-  "codex",
-  "cursor",
-  "gemini",
-  "openclaw",
-  "hermes",
-];
-
-const TYPE_FILTERS: Array<EventType | "all"> = [
-  "all",
+const EVENT_TYPES: Array<EventType> = [
   "prompt",
   "response",
   "tool_call",
   "shell_exec",
   "file_write",
   "file_read",
+  "file_change",
   "session_start",
   "session_end",
+  "compaction",
 ];
 
 export function TimelinePage() {
@@ -48,6 +39,41 @@ export function TimelinePage() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+
+  // Build filter options from the actual buffer so users can't pick a
+  // filter that returns zero (and so the counts tell them how many
+  // events each option matches).
+  const agentCounts = useMemo(() => {
+    const m = new Map<AgentName, number>();
+    for (const e of events) m.set(e.agent, (m.get(e.agent) ?? 0) + 1);
+    return m;
+  }, [events]);
+
+  const typeCounts = useMemo(() => {
+    const m = new Map<EventType, number>();
+    for (const e of events) m.set(e.type, (m.get(e.type) ?? 0) + 1);
+    return m;
+  }, [events]);
+
+  const agentOptions = useMemo(
+    () =>
+      [["all", events.length] as [AgentName | "all", number]].concat(
+        Array.from(agentCounts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, v]) => [k, v] as [AgentName | "all", number]),
+      ),
+    [events.length, agentCounts],
+  );
+
+  const typeOptions = useMemo(
+    () =>
+      [["all", events.length] as [EventType | "all", number]].concat(
+        EVENT_TYPES.filter((t) => typeCounts.has(t)).map(
+          (t) => [t, typeCounts.get(t)!] as [EventType | "all", number],
+        ),
+      ),
+    [events.length, typeCounts],
+  );
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -78,8 +104,8 @@ export function TimelinePage() {
             className="w-full bg-bg-elev border border-bg-border rounded-md pl-9 pr-3 py-1.5 text-sm outline-none focus:border-accent"
           />
         </div>
-        <FilterChip label="agent" value={agent} options={AGENT_FILTERS} onChange={(v) => setAgent(v as typeof agent)} />
-        <FilterChip label="type" value={type} options={TYPE_FILTERS} onChange={(v) => setType(v as typeof type)} />
+        <FilterChip label="agent" value={agent} options={agentOptions} onChange={(v) => setAgent(v as typeof agent)} />
+        <FilterChip label="type" value={type} options={typeOptions} onChange={(v) => setType(v as typeof type)} />
         <div className="ml-auto text-xs text-fg-dim">
           <Filter className="inline w-3.5 h-3.5 mr-1" />
           {filtered.length} / {events.length} events
@@ -160,7 +186,7 @@ function FilterChip<T extends string>({
 }: {
   label: string;
   value: T;
-  options: readonly T[];
+  options: ReadonlyArray<[T, number]>;
   onChange: (v: T) => void;
 }) {
   return (
@@ -171,9 +197,9 @@ function FilterChip<T extends string>({
         onChange={(e) => onChange(e.target.value as T)}
         className="bg-bg-elev border border-bg-border rounded-md px-2 py-1 outline-none focus:border-accent"
       >
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
+        {options.map(([v, count]) => (
+          <option key={v} value={v}>
+            {v} ({count})
           </option>
         ))}
       </select>

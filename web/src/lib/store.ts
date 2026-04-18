@@ -10,7 +10,7 @@ interface EventStore {
   push: (event: AgentEvent) => void;
 }
 
-const MAX = 1000;
+const MAX = 2000;
 
 export const useEventStore = create<EventStore>((set) => ({
   events: [],
@@ -39,7 +39,7 @@ export function useLiveEvents(): void {
   useEffect(() => {
     if (!initialized) {
       api
-        .events({ limit: 500 })
+        .events({ limit: 1000 })
         .then((r) => setInitial(r.events))
         .catch(() => setInitial([]));
     }
