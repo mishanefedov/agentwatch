@@ -25,11 +25,11 @@ export function Shell() {
         <nav className="flex items-center gap-1 text-sm">
           <NavItem to="/" label="Timeline" icon={<Activity className="w-4 h-4" />} end />
           <NavItem to="/projects" label="Projects" icon={<Folder className="w-4 h-4" />} />
-          <NavItem to="/agents" label="Agents" icon={<Terminal className="w-4 h-4" />} disabled />
-          <NavItem to="/search" label="Search" icon={<Search className="w-4 h-4" />} disabled />
+          <NavItem to="/search" label="Search" icon={<Search className="w-4 h-4" />} />
+          <NavItem to="/agents" label="Agents" icon={<Terminal className="w-4 h-4" />} />
+          <NavItem to="/permissions" label="Permissions" icon={<Shield className="w-4 h-4" />} />
+          <NavItem to="/cron" label="Scheduled" icon={<Clock className="w-4 h-4" />} />
           <NavItem to="/trends" label="Trends" icon={<BarChart3 className="w-4 h-4" />} disabled />
-          <NavItem to="/permissions" label="Permissions" icon={<Shield className="w-4 h-4" />} disabled />
-          <NavItem to="/cron" label="Scheduled" icon={<Clock className="w-4 h-4" />} disabled />
           <NavItem to="/settings" label="Settings" icon={<Settings className="w-4 h-4" />} disabled />
         </nav>
         <div className="ml-auto flex items-center gap-3 text-xs text-fg-dim">
