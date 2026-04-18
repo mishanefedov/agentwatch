@@ -17,21 +17,50 @@ import { registerTrendsRoutes } from "./routes/trends.js";
 import { registerDiffRoutes } from "./routes/diffs.js";
 import { registerReplayRoutes } from "./routes/replay.js";
 
+/**
+ * Per-agent cap — each agent's bucket is bounded, so one chatty agent
+ * (claude-code emits ~50k events on boot backfill) can't evict smaller
+ * but equally interesting agents (gemini, codex, openclaw, hermes).
+ */
+const PER_AGENT_CAP = 10_000;
+
 export interface ServerHandle {
   url: string;
   broadcaster: SseBroadcaster;
-  events: AgentEvent[]; // shared in-memory ring, newest-first
+  /** Per-agent buckets; oldest-first within each. */
+  byAgent: Map<string, AgentEvent[]>;
+  /** Flat merged view for callers expecting one array. Rebuilt lazily. */
+  events: AgentEvent[];
+  /** Rebuild `events` from `byAgent`. Cheap enough at our scale. */
+  rebuildFlat: () => void;
   stop: () => Promise<void>;
 }
 
 export interface StartServerOptions {
   host?: string;
   port?: number;
-  events: AgentEvent[]; // owned by the caller (TUI reducer), we only read
+  events?: AgentEvent[]; // optional; kept for back-compat
 }
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3456;
+
+/** Add an event into a per-agent bucket + mark the flat view dirty.
+ *  The flat array is rebuilt lazily on the next API request — that
+ *  defers the O(n log n) sort out of the hot emit path. */
+export function addEventToServer(handle: ServerHandle, e: AgentEvent): void {
+  let bucket = handle.byAgent.get(e.agent);
+  if (!bucket) {
+    bucket = [];
+    handle.byAgent.set(e.agent, bucket);
+  }
+  bucket.push(e);
+  if (bucket.length > PER_AGENT_CAP) {
+    bucket.splice(0, 1_000);
+  }
+  // Invalidate — flat array will be rebuilt lazily.
+  (handle as { flatDirty?: boolean }).flatDirty = true;
+}
 
 /** Resolve the web bundle directory.
  *  After production build: dist/index.js → dist/web/ (sibling).
@@ -53,7 +82,33 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   const port = opts.port ?? DEFAULT_PORT;
   const broadcaster = new SseBroadcaster();
 
+  const byAgent = new Map<string, AgentEvent[]>();
+  const events: AgentEvent[] = opts.events ?? [];
+
+  function rebuildFlat(): void {
+    events.length = 0;
+    for (const bucket of byAgent.values()) {
+      for (const e of bucket) events.push(e);
+    }
+    events.sort((a, b) => (a.ts < b.ts ? -1 : 1));
+  }
+
+  let handle: ServerHandle | null = null;
+
   const app = Fastify({ logger: false });
+
+  // Rebuild flat view on every API request that actually reads events.
+  // Per-request cost is O(n) merge + O(n log n) sort — ~5ms at 10k
+  // events, invisible in user latency.
+  app.addHook("onRequest", async (req) => {
+    if (!req.url.startsWith("/api/")) return;
+    if (req.url === "/api/events/stream") return; // SSE doesn't read flat
+    const dirty = (handle as { flatDirty?: boolean } | null)?.flatDirty;
+    if (dirty !== false) {
+      rebuildFlat();
+      if (handle) (handle as { flatDirty?: boolean }).flatDirty = false;
+    }
+  });
 
   // CORS for dev: allow localhost:5173 (Vite) to hit us during development.
   app.addHook("onSend", async (_req, reply, payload) => {
@@ -93,17 +148,17 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     return reply;
   });
 
-  registerEventRoutes(app, opts.events);
-  registerProjectRoutes(app, opts.events);
-  registerSessionRoutes(app, opts.events);
-  registerAgentRoutes(app, opts.events);
+  registerEventRoutes(app, events);
+  registerProjectRoutes(app, events);
+  registerSessionRoutes(app, events);
+  registerAgentRoutes(app, events, byAgent);
   registerPermissionRoutes(app);
-  registerCronRoutes(app, opts.events);
-  registerSearchRoutes(app, opts.events);
+  registerCronRoutes(app, events);
+  registerSearchRoutes(app, events);
   registerConfigRoutes(app);
-  registerTrendsRoutes(app, opts.events);
-  registerDiffRoutes(app, opts.events);
-  registerReplayRoutes(app, opts.events);
+  registerTrendsRoutes(app, events);
+  registerDiffRoutes(app, events);
+  registerReplayRoutes(app, events);
 
   // Static web bundle (if built).
   const webDist = resolveWebDist();
@@ -127,13 +182,16 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   await app.listen({ host, port });
   const url = `http://${host}:${port}`;
 
-  return {
+  handle = {
     url,
     broadcaster,
-    events: opts.events,
+    byAgent,
+    events,
+    rebuildFlat,
     stop: async () => {
       broadcaster.closeAll();
       await app.close();
     },
   };
+  return handle;
 }

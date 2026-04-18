@@ -8,7 +8,11 @@ export function registerCronRoutes(app: FastifyInstance, events: AgentEvent[]): 
     return {
       jobs: readCronJobs(),
       heartbeats: readAllHeartbeats(),
-      scheduledEvents: events.filter((e) => e.details?.scheduled).slice(0, 200),
+      // events is oldest-first; reverse the last 200 to show newest first.
+      scheduledEvents: events
+        .filter((e) => e.details?.scheduled)
+        .slice(-200)
+        .reverse(),
     };
   });
 }

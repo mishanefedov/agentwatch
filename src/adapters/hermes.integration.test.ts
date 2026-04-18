@@ -88,9 +88,9 @@ describe("startHermesAdapter (integration)", () => {
     stop = null;
   });
 
-  it("treats pre-existing rows as history and does NOT re-emit on boot", () => {
-    // This is the design: the adapter doesn't replay the full DB every restart.
-    // bootstrap() seeds lastMessageId=MAX(id) and seenSessionIds from existing sessions.
+  it("backfills recent pre-existing rows on boot (session_start + prompt)", () => {
+    // Design: mirror claude-code/codex/gemini adapters — read recent
+    // history on startup so the UI has context immediately.
     const db = new Database(dbPath);
     const now = Date.now() / 1000;
     db.prepare(
@@ -103,7 +103,11 @@ describe("startHermesAdapter (integration)", () => {
 
     stop = startHermesAdapter((e) => events.push(e));
 
-    expect(events).toEqual([]);
+    // Should emit session_start, session_end (since ended_at set), and prompt.
+    const types = events.map((e) => e.type).sort();
+    expect(types).toContain("session_start");
+    expect(types).toContain("session_end");
+    expect(types).toContain("prompt");
   });
 
   it("picks up a new session + message written AFTER the adapter starts", { timeout: 10_000 }, async () => {
@@ -139,7 +143,9 @@ describe("startHermesAdapter (integration)", () => {
     seed.close();
 
     stop = startHermesAdapter((e) => events.push(e));
-    expect(events).toEqual([]);
+    // Boot may emit session_start for pre-existing session (now backfilled).
+    // Clear and wait for the *transition* which we're actually testing.
+    events.length = 0;
 
     // Now close the session — simulates hermes finishing it.
     const db = new Database(dbPath);

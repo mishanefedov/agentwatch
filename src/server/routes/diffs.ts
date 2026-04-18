@@ -19,10 +19,8 @@ function isWriteEvent(e: AgentEvent): boolean {
 export function registerDiffRoutes(app: FastifyInstance, events: AgentEvent[]): void {
   app.get<{ Params: { id: string } }>("/api/sessions/:id/diffs", async (req, reply) => {
     const id = decodeURIComponent(req.params.id);
-    const session = events
-      .filter((e) => e.sessionId === id)
-      .slice()
-      .reverse(); // chronological
+    // events is oldest-first now → already chronological for the session.
+    const session = events.filter((e) => e.sessionId === id);
     if (session.length === 0) {
       reply.code(404);
       return { error: "session not found" };

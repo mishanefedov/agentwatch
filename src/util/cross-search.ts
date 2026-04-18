@@ -11,6 +11,8 @@ export interface SearchHit {
   path: string;
   lineNumber: number;
   line: string;
+  /** ISO timestamp sniffed from the raw line (before truncation). */
+  ts?: string;
 }
 
 const MAX_LINE = 500;
@@ -130,11 +132,22 @@ function* walk(dir: string): IterableIterator<string> {
   }
 }
 
+/** Sniff an ISO timestamp from a raw JSONL line. Regex before JSON.parse
+ *  because some lines are multi-MB and we don't need to parse them fully.
+ *  Returns null if no ts field is present. */
+function sniffTs(line: string): string | undefined {
+  const m = line.match(/"(?:timestamp|ts|time|createdAt)"\s*:\s*"([^"]{10,35})"/);
+  return m ? m[1] : undefined;
+}
+
 function hitFromPath(
   file: string,
   lineNumber: number,
   line: string,
 ): SearchHit | null {
+  // Sniff the timestamp BEFORE we truncate so the field survives even
+  // on very long lines.
+  const ts = sniffTs(line);
   const trimmed = line.length > MAX_LINE ? line.slice(0, MAX_LINE) + "…" : line;
   const isClaude = file.includes(path.sep + ".claude" + path.sep + "projects");
   const isCodex = file.includes(path.sep + ".codex" + path.sep + "sessions");
@@ -152,6 +165,7 @@ function hitFromPath(
       path: file,
       lineNumber,
       line: trimmed,
+      ts,
     };
   }
   if (isCodex) {
@@ -163,6 +177,7 @@ function hitFromPath(
       path: file,
       lineNumber,
       line: trimmed,
+      ts,
     };
   }
   if (isGemini) {
@@ -179,6 +194,7 @@ function hitFromPath(
       path: file,
       lineNumber,
       line: trimmed,
+      ts,
     };
   }
   return null;

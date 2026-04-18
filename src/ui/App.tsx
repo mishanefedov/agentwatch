@@ -23,7 +23,7 @@ import {
 } from "../adapters/registry.js";
 import { detectWorkspaceRoot } from "../util/workspace.js";
 import { initialState, matchesQuery, reducer } from "./state.js";
-import { startServer, type ServerHandle } from "../server/index.js";
+import { startServer, type ServerHandle, addEventToServer } from "../server/index.js";
 import { openUrl } from "../util/open-url.js";
 
 /**
@@ -104,8 +104,11 @@ export function App() {
         }
         emitEventSpan(e);
         if (server) {
-          server.events.unshift(e);
-          if (server.events.length > 2000) server.events.length = 2000;
+          // Per-agent cap so one verbose agent (claude-code emits ~50k
+          // events from a few days of history) can't evict everyone
+          // else. Oldest-first storage inside each bucket; routes
+          // merge across buckets on read.
+          addEventToServer(server, e);
           server.broadcaster.emitEvent(e);
         }
         const eventMs = new Date(e.ts).getTime();
@@ -116,8 +119,13 @@ export function App() {
       enrich: (eventId: string, patch: Partial<EventDetails>) => {
         dispatch({ type: "enrich", eventId, patch });
         if (server) {
-          const target = server.events.find((x) => x.id === eventId);
-          if (target) target.details = { ...(target.details ?? {}), ...patch };
+          for (const bucket of server.byAgent.values()) {
+            const target = bucket.find((x) => x.id === eventId);
+            if (target) {
+              target.details = { ...(target.details ?? {}), ...patch };
+              break;
+            }
+          }
           server.broadcaster.emitEnrich(eventId, patch);
         }
       },

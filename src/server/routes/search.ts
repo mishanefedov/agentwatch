@@ -6,7 +6,16 @@ interface SearchBody {
   query: string;
   mode?: "live" | "cross" | "semantic";
   limit?: number;
+  /** Optional ISO timestamps narrowing the window (cross mode only — live
+   *  is ring-buffer scoped already). */
+  since?: string;
+  until?: string;
+  /** Optional agent allowlist. */
+  agents?: string[];
 }
+
+/* Timestamp extraction lives in cross-search.ts/sniffTs — hits carry
+ * a `ts` field when the JSONL line included one. */
 
 export function registerSearchRoutes(app: FastifyInstance, events: AgentEvent[]): void {
   app.post<{ Body: SearchBody }>("/api/search", async (req, reply) => {
@@ -20,13 +29,36 @@ export function registerSearchRoutes(app: FastifyInstance, events: AgentEvent[])
 
     if (mode === "live") {
       const needle = query.toLowerCase();
-      const hits = events.filter((e) => matchesLive(e, needle)).slice(0, limit);
+      // events is oldest-first; walk backwards so top hits are newest.
+      const hits: typeof events = [];
+      for (let i = events.length - 1; i >= 0 && hits.length < limit; i--) {
+        const e = events[i]!;
+        if (matchesLive(e, needle)) hits.push(e);
+      }
       return { mode, hits: hits.map((e) => ({ kind: "live" as const, event: e })) };
     }
 
     if (mode === "cross") {
-      const hits = searchAllSessions(query, limit);
-      return { mode, hits: hits.map((h) => ({ kind: "cross" as const, hit: h })) };
+      // Pull generously, then apply agent + date filters before capping.
+      const raw = searchAllSessions(query, Math.max(limit, 300));
+      const sinceMs = req.body?.since ? Date.parse(req.body.since) : null;
+      const untilMs = req.body?.until ? Date.parse(req.body.until) : null;
+      const agentFilter = req.body?.agents && req.body.agents.length > 0
+        ? new Set(req.body.agents)
+        : null;
+      const enriched = raw
+        .filter((h) => {
+          if (agentFilter && !agentFilter.has(h.agent)) return false;
+          if (sinceMs != null && h.ts && Date.parse(h.ts) < sinceMs) return false;
+          if (untilMs != null && h.ts && Date.parse(h.ts) > untilMs) return false;
+          return true;
+        })
+        .slice(0, limit);
+      return {
+        mode,
+        hits: enriched.map((h) => ({ kind: "cross" as const, hit: h })),
+        totalScanned: raw.length,
+      };
     }
 
     // Semantic: lazy-import so the model download only happens on first request.
