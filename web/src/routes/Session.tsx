@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { agentColor, formatTime, riskClass, typeIcon } from "../lib/format";
-import { ArrowLeft, Download, BarChart3, Activity, GitBranch } from "lucide-react";
+import { ArrowLeft, Download, BarChart3, Activity, GitBranch, FileEdit, Play } from "lucide-react";
 import clsx from "clsx";
 import type { AgentEvent } from "../lib/types";
 
@@ -40,6 +40,12 @@ export function SessionPage() {
           </Link>
           <Link to={`/sessions/${encodeURIComponent(id)}/graph`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
             <GitBranch className="w-3.5 h-3.5" /> graph
+          </Link>
+          <Link to={`/sessions/${encodeURIComponent(id)}/diffs`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
+            <FileEdit className="w-3.5 h-3.5" /> diffs
+          </Link>
+          <Link to={`/sessions/${encodeURIComponent(id)}/replay`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
+            <Play className="w-3.5 h-3.5" /> replay
           </Link>
           <a
             href={`/api/sessions/${encodeURIComponent(id)}/export?format=md&inline=1`}

@@ -29,8 +29,8 @@ export function Shell() {
           <NavItem to="/agents" label="Agents" icon={<Terminal className="w-4 h-4" />} />
           <NavItem to="/permissions" label="Permissions" icon={<Shield className="w-4 h-4" />} />
           <NavItem to="/cron" label="Scheduled" icon={<Clock className="w-4 h-4" />} />
-          <NavItem to="/trends" label="Trends" icon={<BarChart3 className="w-4 h-4" />} disabled />
-          <NavItem to="/settings" label="Settings" icon={<Settings className="w-4 h-4" />} disabled />
+          <NavItem to="/trends" label="Trends" icon={<BarChart3 className="w-4 h-4" />} />
+          <NavItem to="/settings" label="Settings" icon={<Settings className="w-4 h-4" />} />
         </nav>
         <div className="ml-auto flex items-center gap-3 text-xs text-fg-dim">
           <span className={clsx("w-2 h-2 rounded-full", health.isSuccess ? "bg-ok" : "bg-warn")} />
