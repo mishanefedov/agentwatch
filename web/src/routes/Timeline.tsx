@@ -1,6 +1,6 @@
 import { useEventStore } from "../lib/store";
 import { Link } from "react-router-dom";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { agentColor, formatTime, riskClass, typeIcon } from "../lib/format";
 import type { AgentEvent, AgentName, EventType } from "../lib/types";
 import { Search, Filter } from "lucide-react";
@@ -34,6 +34,20 @@ export function TimelinePage() {
   const [q, setQ] = useState("");
   const [agent, setAgent] = useState<AgentName | "all">("all");
   const [type, setType] = useState<EventType | "all">("all");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Global `/` hotkey focuses the filter input (ignored inside other inputs).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey) return;
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+      e.preventDefault();
+      inputRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -57,9 +71,10 @@ export function TimelinePage() {
         <div className="relative flex-1 max-w-lg">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none" />
           <input
+            ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="filter the live buffer…"
+            placeholder="filter the live buffer…  (press / to focus)"
             className="w-full bg-bg-elev border border-bg-border rounded-md pl-9 pr-3 py-1.5 text-sm outline-none focus:border-accent"
           />
         </div>
