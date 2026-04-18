@@ -436,6 +436,7 @@ clipboard (on explicit `y`) / disk (on explicit `e` to export).
 | `~/.gemini/settings.json` + `trustedFolders.json`            | Gemini permissions                       |
 | `~/.openclaw/agents/*/sessions/*.jsonl`                      | OpenClaw sub-agent sessions              |
 | `~/.openclaw/logs/config-audit.jsonl` + `openclaw.json`      | OpenClaw config audit + agent roster     |
+| `~/.hermes/state.db` (SQLite)                                | Hermes Agent sessions + messages         |
 | `~/.cursor/{mcp.json, cli-config.json, ide_state.json}`      | Cursor config state                      |
 | Any `.cursorrules` / `.cursor/rules/*.mdc` under WORKSPACE   | Cursor project rules                     |
 | `{CLAUDE,AGENTS,GEMINI,OPENCLAW}.md` + `.windsurfrules` etc. | Per-agent memory files for token attribution |
@@ -576,7 +577,7 @@ TypeScript monorepo. Three-layer mental model:
                           │  EventSink.emit / enrich
 ┌─────────────────────────┴───────────────────────────────────┐
 │  Adapter layer  (one per agent)                             │
-│    claude-code · codex · gemini · cursor · openclaw         │
+│    claude-code · codex · gemini · cursor · openclaw · hermes │
 │    fs-watcher (generic)                                     │
 └─────────────────────────▲───────────────────────────────────┘
                           │  files read-only

@@ -4,6 +4,7 @@ export type AgentName =
   | "cursor"
   | "gemini"
   | "openclaw"
+  | "hermes"
   | "aider"
   | "cline"
   | "continue"

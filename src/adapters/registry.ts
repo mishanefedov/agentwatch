@@ -5,6 +5,7 @@ import { startOpenClawAdapter } from "./openclaw.js";
 import { startCursorAdapter } from "./cursor.js";
 import { startGeminiAdapter } from "./gemini.js";
 import { startCodexAdapter } from "./codex.js";
+import { startHermesAdapter } from "./hermes.js";
 import { startFsAdapter } from "./fs-watcher.js";
 
 /**
@@ -57,6 +58,10 @@ export function startAllAdapters(
   started.push({
     name: "codex",
     stop: wrap(() => startCodexAdapter(sink), "codex"),
+  });
+  started.push({
+    name: "hermes",
+    stop: wrap(() => startHermesAdapter(sink), "hermes"),
   });
   started.push({
     name: "fs-watcher",
