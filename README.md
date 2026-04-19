@@ -22,6 +22,8 @@ semantic conventions. All local. No cloud. No telemetry. No sign-in.
 
 <div align="center">
   <img src="./docs/timeline.png" alt="agentwatch web UI — unified timeline across 5 agents, each in its own workspace" width="1100" />
+  <br />
+  <img src="./docs/event-detail.png" alt="agentwatch event detail view — full command, tool I/O, usage + cost" width="1100" />
 </div>
 
 **The TUI is the live tail. The web UI is where you drill in** — projects,
