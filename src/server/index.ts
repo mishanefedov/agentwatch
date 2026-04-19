@@ -132,18 +132,9 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     reply.raw.setHeader("X-Accel-Buffering", "no");
     reply.raw.flushHeaders?.();
     const clientId = broadcaster.attach(reply.raw);
-    // Send a heartbeat every 15s so proxies don't kill idle conns.
-    const hb = setInterval(() => {
-      try {
-        reply.raw.write(": heartbeat\n\n");
-      } catch {
-        // client gone
-      }
-    }, 15_000);
-    req.raw.on("close", () => {
-      clearInterval(hb);
-      broadcaster.detach(clientId);
-    });
+    // Heartbeat is owned by the broadcaster — a single tick for N clients
+    // that shares dead-socket detection with `broadcast()`.
+    req.raw.on("close", () => broadcaster.detach(clientId));
     // Keep the handler alive until the socket closes.
     return reply;
   });
