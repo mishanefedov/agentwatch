@@ -1,6 +1,7 @@
 import { render } from "ink";
 import { App } from "./ui/App.js";
 import { restoreTerminal } from "./util/terminal.js";
+import { onShutdown, runShutdownHooks } from "./util/shutdown.js";
 
 const arg = process.argv[2];
 
@@ -118,12 +119,11 @@ if (arg === "serve") {
     },
   };
   const adapters = startAllAdapters(sink, workspace);
+  onShutdown(() => stopAllAdapters(adapters));
+  onShutdown(() => server.stop());
   process.stderr.write(`[agentwatch] serving ${server.url}\n`);
-  process.on("SIGINT", async () => {
-    stopAllAdapters(adapters);
-    await server.stop();
-    process.exit(0);
-  });
+  // Signal handling happens at the bottom of this file via the global
+  // shutdown-hooks wiring; the serve path just registers its cleanup.
   await new Promise(() => undefined);
 }
 
@@ -135,12 +135,41 @@ function parseFlag(name: string): string | undefined {
 }
 
 enterAltScreen();
-for (const sig of ["exit", "SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.on(sig, () => {
-    restoreTerminal();
-    if (sig !== "exit") process.exit(0);
-  });
+
+/** Single shutdown path — restore the terminal, drain every registered
+ *  hook (adapters, web server, triggers watcher), then exit. Idempotent:
+ *  a second signal mid-drain is swallowed by `runShutdownHooks`. */
+let shuttingDown = false;
+async function shutdown(code: number): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  restoreTerminal();
+  try {
+    await runShutdownHooks();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[agentwatch] shutdown error:", err);
+  }
+  process.exit(code);
 }
 
-const { waitUntilExit } = render(<App />);
-waitUntilExit().finally(() => restoreTerminal());
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(sig, () => {
+    void shutdown(0);
+  });
+}
+// `exit` fires synchronously and can't await — best-effort terminal reset.
+process.on("exit", () => {
+  restoreTerminal();
+});
+
+if (arg !== "serve") {
+  const { waitUntilExit } = render(<App />);
+  waitUntilExit()
+    .catch(() => {
+      // Ink sometimes rejects on Ctrl-C; shutdown handler covers it.
+    })
+    .finally(() => {
+      void shutdown(0);
+    });
+}

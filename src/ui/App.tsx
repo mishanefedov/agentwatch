@@ -5,7 +5,6 @@ import { Timeline } from "./Timeline.js";
 import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
 import { Breadcrumb } from "./Breadcrumb.js";
-import { restoreTerminal } from "../util/terminal.js";
 import { computeBudgetStatus } from "../util/budgets.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { watchTriggers } from "../util/triggers.js";
@@ -25,6 +24,7 @@ import { detectWorkspaceRoot } from "../util/workspace.js";
 import { initialState, matchesQuery, reducer } from "./state.js";
 import { startServer, type ServerHandle, addEventToServer } from "../server/index.js";
 import { openUrl } from "../util/open-url.js";
+import { onShutdown } from "../util/shutdown.js";
 
 /**
  * agentwatch TUI — live log tail.
@@ -57,6 +57,7 @@ export function App() {
     const host = findFlag("--host") ?? process.env.AGENTWATCH_HOST ?? "127.0.0.1";
     let handle: ServerHandle | null = null;
     let cancelled = false;
+    let unregister: (() => void) | null = null;
     startServer({ host, port, events })
       .then((h) => {
         if (cancelled) {
@@ -65,6 +66,7 @@ export function App() {
         }
         handle = h;
         setServer(h);
+        unregister = onShutdown(() => h.stop());
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
@@ -72,6 +74,7 @@ export function App() {
       });
     return () => {
       cancelled = true;
+      unregister?.();
       if (handle) void handle.stop();
     };
   }, []);
@@ -131,7 +134,13 @@ export function App() {
       },
     };
     const adapters = startAllAdapters(sink, workspace);
+    const unregisterShutdown = onShutdown(() => {
+      flush();
+      stopAllAdapters(adapters);
+      stopTriggersWatch();
+    });
     return () => {
+      unregisterShutdown();
       flush();
       stopAllAdapters(adapters);
       stopTriggersWatch();
@@ -252,9 +261,10 @@ export function App() {
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
+      // `exit()` unmounts ink, which triggers our useEffect cleanup
+      // (stopAllAdapters etc). waitUntilExit().finally in index.tsx
+      // drains the global shutdown hooks before process.exit.
       exit();
-      restoreTerminal();
-      setImmediate(() => process.exit(0));
       return;
     }
     if (state.searchOpen) {
@@ -277,8 +287,6 @@ export function App() {
     }
     if (input === "q") {
       exit();
-      restoreTerminal();
-      setImmediate(() => process.exit(0));
       return;
     }
     if (input === "w" && server) {
