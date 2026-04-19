@@ -1,7 +1,7 @@
 {
   "name": "@misha_misha/agentwatch",
-  "version": "0.0.3",
-  "description": "Local-only observability for every AI agent on your machine. Unified timeline across Claude Code, Codex, Gemini CLI, Cursor, OpenClaw — with token attribution, anomaly detection, MCP server mode, OpenTelemetry exporter, and hybrid semantic search. No cloud, no telemetry, no sign-in.",
+  "version": "0.0.4",
+  "description": "Local-only observability + control plane for every AI coding agent on your machine. TUI live tail + browser dashboard on localhost. Unified timeline across Claude Code, Codex, Gemini CLI, Cursor, Hermes, OpenClaw — token + cost accounting, compaction + anomaly detection, SVG call graphs, diff attribution, agent-aware replay, MCP server mode, OpenTelemetry exporter. No cloud, no telemetry, no sign-in.",
   "type": "module",
   "author": "Misha Nefedov",
   "repository": {

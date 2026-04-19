@@ -35,7 +35,7 @@ export function Header({
       <Box flexDirection="row" justifyContent="space-between">
         <Text>
           <Text bold color="cyan">agentwatch </Text>
-          <Text dimColor>v0.0.1</Text>
+          <Text dimColor>v0.0.4</Text>
         </Text>
         <Text>
           <Text dimColor>workspace: </Text>
