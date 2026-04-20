@@ -95,8 +95,14 @@ Priority order — first condition that matches wins:
     (open issues, open PRs, new issue comments
     that the agent has not yet triaged)
 
-  < 3 open Todo issues in Linear project     →  GROOM mode
+  < 3 open Todo AND < 5 open `ai-refinement` issues
+                                              →  GROOM mode
   ≥ 1 `agent-ready` Linear issue             →  IMPLEMENT mode
+  ≥ 5 open `ai-refinement` issues and no     →  IMPLEMENT mode
+    `agent-ready` available                       (treat oldest ai-refinement
+                                                   as agent-ready; ship a
+                                                   reasonable interpretation,
+                                                   document assumption in PR)
   a user-visible feature shipped in last 7d  →  PROMOTE mode  (≤1× per merged PR)
   none of the above                          →  GROOM mode
 ```
@@ -403,10 +409,20 @@ Every run ends with:
 2. Commit + push the branch. Open the PR if IMPLEMENT mode.
 3. Send the Telegram message with a one-line summary and the
    Linear/PR URL.
-4. If you hit a blocker you can't resolve (missing context, ambiguous
-   requirements, failing test you can't diagnose), stop, create a
-   Linear issue with `blocked` label, and Telegram-ping the human.
-   Don't force it.
+4. **Ambiguity is not a blocker.** If requirements are ambiguous or
+   context is missing, pick the most reasonable interpretation,
+   document the assumption in the PR description under "Assumptions",
+   and ship. The human overrides in review.
+
+   Use `[BLOCKED]` ONLY for hard blockers: broken credentials, API
+   unavailable, test infrastructure missing, environment failure.
+   These are things that block **the mechanical act of shipping**,
+   not things that merely require judgment. Your judgment is
+   cheaper than another daily cycle.
+
+   When you do hit a true hard blocker, create a Linear issue with
+   `blocked` label, Telegram-ping the human with `[BLOCKED]`, and
+   exit clean.
 
 ---
 
