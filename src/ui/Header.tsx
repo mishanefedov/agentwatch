@@ -3,6 +3,7 @@ import type { AgentName } from "../schema.js";
 import type { BudgetStatus } from "../util/budgets.js";
 import type { AnomalyFlag, SessionAnomalySummary } from "../util/anomaly.js";
 import { formatUSD } from "../util/cost.js";
+import { VERSION } from "../util/version.js";
 
 interface Props {
   workspace: string;
@@ -35,7 +36,7 @@ export function Header({
       <Box flexDirection="row" justifyContent="space-between">
         <Text>
           <Text bold color="cyan">agentwatch </Text>
-          <Text dimColor>v0.0.4</Text>
+          <Text dimColor>v{VERSION}</Text>
         </Text>
         <Text>
           <Text dimColor>workspace: </Text>
