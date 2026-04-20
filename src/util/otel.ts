@@ -1,5 +1,6 @@
 import type { AgentEvent } from "../schema.js";
 import { contextWindow } from "./compaction.js";
+import { VERSION } from "./version.js";
 
 /**
  * Optional OTel exporter. Enabled when AGENTWATCH_OTLP_ENDPOINT is set
@@ -105,7 +106,7 @@ export async function initOtel(): Promise<void> {
     const sdk = new NodeSDK({
       resource: resourceFromAttributes({
         "service.name": "agentwatch",
-        "service.version": "0.0.4",
+        "service.version": VERSION,
       }),
       traceExporter: new OTLPTraceExporter({ url: endpoint }),
     });

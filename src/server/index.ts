@@ -16,6 +16,7 @@ import { registerConfigRoutes } from "./routes/config.js";
 import { registerTrendsRoutes } from "./routes/trends.js";
 import { registerDiffRoutes } from "./routes/diffs.js";
 import { registerReplayRoutes } from "./routes/replay.js";
+import { VERSION } from "../util/version.js";
 
 /**
  * Per-agent cap — each agent's bucket is bounded, so one chatty agent
@@ -122,7 +123,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   });
 
   // Health + version
-  app.get("/api/health", async () => ({ ok: true, version: "0.0.4" }));
+  app.get("/api/health", async () => ({ ok: true, version: VERSION }));
 
   // SSE stream
   app.get("/api/events/stream", async (req, reply) => {
