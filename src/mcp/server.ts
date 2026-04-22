@@ -17,6 +17,7 @@ import {
   type HermesSession,
 } from "../adapters/hermes.js";
 import type { AgentEvent } from "../schema.js";
+import { VERSION } from "../util/version.js";
 
 /**
  * agentwatch MCP server. Exposes the user's local agent history so
@@ -49,7 +50,7 @@ interface SessionRef {
 export async function runMcpServer(): Promise<void> {
   const server = new McpServer({
     name: "agentwatch",
-    version: "0.0.4",
+    version: VERSION,
   });
 
   server.registerTool(
