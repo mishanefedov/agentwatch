@@ -111,8 +111,13 @@ prefix and the reason.
 - **Branch naming:** `agent/aur-<N>-<slug>` where `<N>` is the Linear
   issue number (e.g. `agent/aur-210-fix-cursor-adapter-crash`).
 - **Time-box:** if a single TDD cycle takes >3 exec turns without
-  converging, you are going in circles. Stop, Telegram `[BLOCKED]`, file
-  a Linear issue explaining what broke, exit clean.
+  converging AND the issue is a genuine technical blocker (broken
+  credentials, broken API, missing test infra, environment failure),
+  stop, Telegram `[BLOCKED]`, file a Linear issue, exit clean.
+- **Ambiguity is not a blocker.** If the spec is unclear, pick the
+  most reasonable interpretation, document the assumption in the PR
+  description under "Assumptions", and ship. The human overrides in
+  review. Do not file meta-blocker issues to escape ambiguity.
 
 ---
 
