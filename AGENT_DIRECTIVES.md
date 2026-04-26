@@ -406,9 +406,22 @@ Every run ends with:
 
 1. Update the relevant Linear issue(s): `In Progress` if you started
    work, comment on status. Don't mark `Done` — the human does.
-2. Commit + push the branch. Open the PR if IMPLEMENT mode.
+2. **Persist every write you made, in every repo you touched:**
+   - For `~/IdeaProjects/agentwatch/`: branch → commit → push → open
+     a PR against `main` in IMPLEMENT mode. Never push to `main`.
+   - For `~/IdeaProjects/knowledge-base/` (if you wrote to it at any
+     point during this run — audits, reports, notes, anything):
+     `cd ~/IdeaProjects/knowledge-base && git add <files you touched>
+     && git commit -m "<descriptive>" && git push origin main`. The
+     KB is not a code repo — commit straight to `main`, no PR needed.
+   - For any other repo you wrote to: at minimum commit + push. If
+     unsure whether pushing is safe, stop and Telegram-ping the human.
+   - **A run that leaves untracked files or unpushed commits in any
+     repo is a failed run.** Writing without persisting defeats the
+     purpose of running at all.
 3. Send the Telegram message with a one-line summary and the
-   Linear/PR URL.
+   Linear/PR URL. Include the KB commit SHA (short) if you committed
+   anything to the KB this run.
 4. **Ambiguity is not a blocker.** If requirements are ambiguous or
    context is missing, pick the most reasonable interpretation,
    document the assumption in the PR description under "Assumptions",
@@ -422,7 +435,11 @@ Every run ends with:
 
    When you do hit a true hard blocker, create a Linear issue with
    `blocked` label, Telegram-ping the human with `[BLOCKED]`, and
-   exit clean.
+   exit clean. Still commit+push anything you already wrote before
+   stopping — partial work belongs on the remote, not in local
+   uncommitted state. **A `[BLOCKED]` exit with a dirty working tree
+   is itself a failure**: clean it (commit+push, or stash) before
+   pinging.
 
 ---
 
