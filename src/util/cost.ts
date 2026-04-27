@@ -1,5 +1,25 @@
-/** Per-million-token rates in USD. Update when Anthropic changes pricing. */
-const RATES: Record<
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/** Per-million-token rates in USD. AUR-216: defaults below ship with
+ *  the CLI, but operators can override or add new models by writing a
+ *  JSON file at `~/.agentwatch/pricing.json` (or wherever the env var
+ *  AGENTWATCH_PRICING_PATH points). The file is shape:
+ *
+ *    {
+ *      "claude-opus-4-6":  { "input": 15.0, "cacheCreate": 18.75, ... },
+ *      "gpt-5":            { "input": 1.5,  "output":      11.0,  ... },
+ *      "my-local-model":   { "input": 0,    "output":      0      }
+ *    }
+ *
+ *  The model key is the normalized name (see normalizeModel below).
+ *  The user file is shallow-merged into the defaults — any model
+ *  present in the user file wins for that whole entry; other defaults
+ *  are preserved. Partial overrides at the field level are NOT
+ *  supported (it's all four numbers, or nothing) so we never silently
+ *  use a stale field if the operator only wrote `input`. */
+const DEFAULT_RATES: Record<
   string,
   {
     input: number;
@@ -61,6 +81,81 @@ const RATES: Record<
   },
 };
 
+export type Rate = (typeof DEFAULT_RATES)[string];
+
+let cachedRates: Record<string, Rate> | null = null;
+
+export function pricingFilePath(): string {
+  return (
+    process.env.AGENTWATCH_PRICING_PATH ??
+    join(homedir(), ".agentwatch", "pricing.json")
+  );
+}
+
+/** Validate a single rate entry — every field must be a non-negative
+ *  number. Returns null for invalid shapes so the caller can keep the
+ *  default for that model. */
+function coerceRate(v: unknown): Rate | null {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Record<string, unknown>;
+  const isNonNegNumber = (x: unknown): x is number =>
+    typeof x === "number" && Number.isFinite(x) && x >= 0;
+  if (
+    !isNonNegNumber(r.input) ||
+    !isNonNegNumber(r.cacheCreate) ||
+    !isNonNegNumber(r.cacheRead) ||
+    !isNonNegNumber(r.output)
+  ) {
+    return null;
+  }
+  return {
+    input: r.input,
+    cacheCreate: r.cacheCreate,
+    cacheRead: r.cacheRead,
+    output: r.output,
+  };
+}
+
+export function loadRates(): Record<string, Rate> {
+  if (cachedRates) return cachedRates;
+  const path = pricingFilePath();
+  const merged: Record<string, Rate> = { ...DEFAULT_RATES };
+  if (existsSync(path)) {
+    try {
+      const raw = readFileSync(path, "utf8");
+      const doc = JSON.parse(raw);
+      if (doc && typeof doc === "object") {
+        for (const [model, value] of Object.entries(
+          doc as Record<string, unknown>,
+        )) {
+          const rate = coerceRate(value);
+          if (rate) merged[model] = rate;
+          else if (process.env.AGENTWATCH_PRICING_DEBUG) {
+            // eslint-disable-next-line no-console
+            console.error(
+              `[agentwatch/cost] dropping invalid pricing entry for "${model}" — needs input/cacheCreate/cacheRead/output non-negative numbers`,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[agentwatch/cost] failed to read ${path}: ${String(err)}; using built-in defaults`,
+      );
+    }
+  }
+  cachedRates = merged;
+  return merged;
+}
+
+/** @internal Test-only: drop the cached rates so the next loadRates()
+ *  call re-reads the file. Lets tests point AGENTWATCH_PRICING_PATH at
+ *  a fixture and observe the override. */
+export function _resetPricingCache(): void {
+  cachedRates = null;
+}
+
 export interface Usage {
   input: number;
   cacheCreate: number;
@@ -70,7 +165,8 @@ export interface Usage {
 
 /** Returns USD cost for a single message's usage object. */
 export function costOf(model: string, u: Usage): number {
-  const rate = RATES[normalizeModel(model)] ?? RATES.default!;
+  const rates = loadRates();
+  const rate = rates[normalizeModel(model)] ?? rates.default!;
   return (
     (u.input * rate.input +
       u.cacheCreate * rate.cacheCreate +

@@ -27,11 +27,49 @@ message's `usage` object:
 - `cache_read_input_tokens` (billed at ~10% of input)
 - `output_tokens`
 
-Rate table hardcoded per model in `src/util/cost.ts`:
+Rate table per model lives in `src/util/cost.ts` (DEFAULT_RATES):
 - `claude-opus-4-6`
 - `claude-sonnet-4-6`
 - `claude-haiku-4-5`
+- `gemini-2.5-pro`, `gemini-2.5-flash`
+- `gpt-5`, `gpt-5-mini`
 - `default` fallback (uses sonnet rates)
+
+### Overriding pricing locally (AUR-216)
+
+Provider rates change between releases. Operators can override the
+shipped defaults without rebuilding the CLI by writing a JSON file at
+`~/.agentwatch/pricing.json` (or wherever `AGENTWATCH_PRICING_PATH`
+points):
+
+```json
+{
+  "claude-opus-4-6": {
+    "input": 15.0,
+    "cacheCreate": 18.75,
+    "cacheRead": 1.5,
+    "output": 75.0
+  },
+  "my-local-model": {
+    "input": 0,
+    "cacheCreate": 0,
+    "cacheRead": 0,
+    "output": 0
+  }
+}
+```
+
+Rules:
+- Keys are the **normalized** model name (e.g. `gpt-5` not `gpt-5.4-preview`;
+  see `normalizeModel` in `cost.ts`).
+- Values are USD per **million** tokens.
+- All four fields (`input`, `cacheCreate`, `cacheRead`, `output`) must be
+  non-negative numbers — partial entries are dropped (we never silently
+  use a stale field).
+- Unknown / missing models fall back to `default` from `DEFAULT_RATES`.
+- The file is read once at adapter startup. Restart agentwatch to pick
+  up edits.
+- Set `AGENTWATCH_PRICING_DEBUG=1` to log validation rejections.
 
 `costOf(model, usage)` returns USD as a float. `formatUSD(n)` formats with
 adaptive precision:
