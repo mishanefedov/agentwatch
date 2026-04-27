@@ -283,6 +283,12 @@ the order. Higher always wins ties.
 - Do not comment on GitHub issues/PRs with prose that sounds like the
   maintainer. Labels are fine; drafts go to Linear + Telegram.
 - Do not `@`-mention anyone in a GitHub comment. Michael gets Telegram.
+- Do not run hang-prone shell commands without an explicit timeout.
+  Use the `wt <secs> <cmd>` helper (see prompt.md → *Timeouts on
+  hang-prone commands*). The 2026-04-21 17-minute timeout
+  (run 981bbbf1…) burned the whole cron window because a single
+  command blocked unbounded — the cron 15-min backstop is not a
+  substitute for per-command discipline.
 
 ---
 
