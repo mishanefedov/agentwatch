@@ -8,6 +8,7 @@ import { nextId } from "../util/ids.js";
 import { costOf } from "../util/cost.js";
 import { consumeSpawn } from "../util/spawn-tracker.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
+import { createParseErrorTracker } from "../util/parse-errors.js";
 
 const BACKFILL_BYTES = 4 * 1024 * 1024;
 
@@ -42,6 +43,7 @@ export function startCodexAdapter(sink: EventSink): () => void {
   const dir = codexSessionsDir();
   if (!existsSync(dir)) return () => {};
 
+  const parseErrors = createParseErrorTracker("codex", sink);
   const cursors = new Map<string, Cursor>();
   const rolloutRe = /rollout-[^/\\]+\.jsonl$/;
   const watcher = chokidar.watch(dir, {
@@ -82,6 +84,7 @@ export function startCodexAdapter(sink: EventSink): () => void {
       try {
         obj = JSON.parse(line) as Record<string, unknown>;
       } catch {
+        parseErrors.recordFailure(sessionId, line);
         continue;
       }
       const payload = (obj.payload ?? {}) as Record<string, unknown>;
