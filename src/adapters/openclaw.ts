@@ -6,6 +6,7 @@ import type { AgentEvent, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
+import { createParseErrorTracker } from "../util/parse-errors.js";
 import {
   classifySessionKey,
   type ScheduledMarker,
@@ -67,10 +68,15 @@ export function _resetOpenClawScheduledCache(): void {
 }
 
 export function startOpenClawAdapter(sink: Emit): () => void {
-  const emit = typeof sink === "function" ? sink : sink.emit;
+  const normalized: EventSink =
+    typeof sink === "function"
+      ? { emit: sink, enrich: () => {} }
+      : sink;
+  const emit = normalized.emit;
   const root = join(homedir(), ".openclaw");
   if (!existsSync(root)) return () => {};
 
+  const parseErrors = createParseErrorTracker("openclaw", normalized);
   const cursors = new Map<string, FileCursor>();
   const stoppers: Array<() => void> = [];
 
@@ -86,7 +92,7 @@ export function startOpenClawAdapter(sink: Emit): () => void {
   });
   const handleSession = (f: string, initial: boolean) => {
     if (!sessionRe.test(f)) return;
-    processSession(f, initial, cursors, emit);
+    processSession(f, initial, cursors, emit, parseErrors);
   };
   sessionsWatcher.on("add", (f) => handleSession(f, true));
   sessionsWatcher.on("change", (f) => handleSession(f, false));
@@ -101,8 +107,12 @@ export function startOpenClawAdapter(sink: Emit): () => void {
     persistent: true,
     ignoreInitial: false,
   });
-  auditWatcher.on("add", (f) => processAudit(f, true, cursors, emit));
-  auditWatcher.on("change", (f) => processAudit(f, false, cursors, emit));
+  auditWatcher.on("add", (f) =>
+    processAudit(f, true, cursors, emit, parseErrors),
+  );
+  auditWatcher.on("change", (f) =>
+    processAudit(f, false, cursors, emit, parseErrors),
+  );
   auditWatcher.on("error", swallow);
   stoppers.push(() => {
     void auditWatcher.close();
@@ -118,6 +128,7 @@ function processSession(
   startFromEnd: boolean,
   cursors: Map<string, FileCursor>,
   emit: (e: AgentEvent) => void,
+  parseErrors: { recordFailure(sessionKey: string, line: string): void },
 ) {
   const subAgent = extractSubAgent(file);
   const sessionId = basename(file, ".jsonl");
@@ -130,6 +141,7 @@ function processSession(
     try {
       obj = JSON.parse(line);
     } catch {
+      parseErrors.recordFailure(sessionId, line);
       return;
     }
     const event = translateSession(obj, subAgent, sessionId);
@@ -154,12 +166,14 @@ function processAudit(
   startFromEnd: boolean,
   cursors: Map<string, FileCursor>,
   emit: (e: AgentEvent) => void,
+  parseErrors: { recordFailure(sessionKey: string, line: string): void },
 ) {
   streamLines(file, startFromEnd, cursors, (line) => {
     let obj: unknown;
     try {
       obj = JSON.parse(line);
     } catch {
+      parseErrors.recordFailure("config-audit", line);
       return;
     }
     const event = translateAudit(obj);

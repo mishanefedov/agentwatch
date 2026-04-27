@@ -21,6 +21,7 @@ export type EventType =
   | "prompt"
   | "response"
   | "compaction"
+  | "parse_error"
   | "session_start"
   | "session_end";
 
@@ -96,6 +97,12 @@ export interface EventDetails {
      *  (e.g. `cron:<jobId>:run:<runId>`). */
     runId?: string;
   };
+  /** AUR-228: number of unparseable lines we've seen for this session.
+   *  Carried on a synthetic `parse_error` event so operators can see
+   *  they're missing context. */
+  parseErrorCount?: number;
+  /** Truncated preview of the most recent unparseable line. */
+  parseErrorSample?: string;
 }
 
 /** Sink passed to adapters. Adapters emit new events and may later
@@ -148,5 +155,6 @@ export function riskOf(type: EventType, path?: string, cmd?: string): number {
     return 2;
   }
   if (type === "tool_call") return 3;
+  if (type === "parse_error") return 1;
   return 1;
 }
