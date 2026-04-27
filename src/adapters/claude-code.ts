@@ -10,6 +10,7 @@ import { registerSpawn } from "../util/spawn-tracker.js";
 import { costOf, parseUsage } from "../util/cost.js";
 import { markAgentWrite } from "../util/recent-writes.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
+import { createParseErrorTracker } from "../util/parse-errors.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
 
@@ -44,11 +45,13 @@ interface FileCursor {
 const BACKFILL_BYTES = 4 * 1024 * 1024;
 
 export function startClaudeAdapter(sink: Emit): () => void {
-  const { emit, enrich } = normalizeSink(sink);
+  const normalized = normalizeSink(sink);
+  const { emit, enrich } = normalized;
   const dir = claudeProjectsDir();
   if (!existsSync(dir)) {
     return () => {};
   }
+  const parseErrors = createParseErrorTracker("claude-code", normalized);
 
   const cursors = new Map<string, FileCursor>();
   // chokidar v4 dropped glob support; watch the projects dir recursively
@@ -96,6 +99,7 @@ export function startClaudeAdapter(sink: Emit): () => void {
       try {
         obj = JSON.parse(line);
       } catch {
+        parseErrors.recordFailure(sessionId, line);
         continue;
       }
       // First, harvest any tool_result blocks from user turns — they
