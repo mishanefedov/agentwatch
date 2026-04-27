@@ -175,8 +175,32 @@ The repo is public on GitHub. External people open issues and PRs.
 Your job in this mode is to **route, label, and draft responses — never
 to speak for the maintainer or merge anything**.
 
-Activity to scan each run (since the last triage timestamp in
-`~/.agentwatch-bot/last-triage.txt` — create it on first run with `now`):
+Activity to scan each run, since the last triage timestamp in
+`~/.agentwatch-bot/last-triage.txt`. **AUR-242: this file may be missing,
+empty, or garbled — initialize defensively before reading.** Run
+exactly this block at the start of TRIAGE mode:
+
+```bash
+TRIAGE_FILE=~/.agentwatch-bot/last-triage.txt
+mkdir -p "$(dirname "$TRIAGE_FILE")"
+# Default to now-24h so the first run still surfaces recent activity
+# instead of an empty scan.
+DEFAULT_TRIAGE=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+  || date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+if [ ! -f "$TRIAGE_FILE" ]; then
+  echo "$DEFAULT_TRIAGE" > "$TRIAGE_FILE"
+fi
+LAST_TRIAGE_ISO=$(cat "$TRIAGE_FILE")
+# Reject anything that doesn't look like an ISO-8601 UTC timestamp.
+if ! echo "$LAST_TRIAGE_ISO" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'; then
+  LAST_TRIAGE_ISO="$DEFAULT_TRIAGE"
+  echo "$LAST_TRIAGE_ISO" > "$TRIAGE_FILE"
+fi
+LAST_TRIAGE=${LAST_TRIAGE_ISO%Z}  # `gh search` wants no trailing Z
+```
+
+This makes the gh search query stable on a fresh dev machine, after a
+manual edit, or if the file is wiped between runs.
 
 - **New issues:** `gh issue list --state open --search "created:>$LAST_TRIAGE sort:created-desc"`
 - **New PRs:** `gh pr list --state open --search "created:>$LAST_TRIAGE"`

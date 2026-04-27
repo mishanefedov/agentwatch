@@ -146,6 +146,11 @@ prefix and the reason.
 7. Execute the mode end-to-end.
 8. Telegram-ping with summary + URL.
 
+> **TRIAGE quirk (AUR-242):** if you pick TRIAGE mode, run the
+> last-triage initializer block from AGENT_DIRECTIVES.md §5 *before*
+> running any gh search. The file may be missing or garbled on a fresh
+> machine and that breaks the query silently.
+
 ---
 
 ## Rules that apply *always*
