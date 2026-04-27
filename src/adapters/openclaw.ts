@@ -1,11 +1,11 @@
 import chokidar from "chokidar";
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join, sep } from "node:path";
 import { homedir } from "node:os";
 import type { AgentEvent, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
+import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
 import {
   classifySessionKey,
   type ScheduledMarker,
@@ -186,26 +186,17 @@ function streamLines(
   if (size <= cursor.offset) return;
 
   const start = cursor.offset;
-  const stream = createReadStream(file, {
+  const { lines, consumed } = readNewlineTerminatedLines(
+    file,
     start,
-    end: size - 1,
-    encoding: "utf8",
-  });
-  let consumed = 0;
-  let skippedFirst = false;
-  const rl = createInterface({ input: stream, crlfDelay: Infinity });
-  rl.on("line", (line) => {
-    consumed += Buffer.byteLength(line, "utf8") + 1;
-    // If we started mid-file, drop the first (likely partial) line
-    if (isInitialAdd && start > 0 && !skippedFirst) {
-      skippedFirst = true;
-      return;
-    }
+    size - 1,
+  );
+  cursor.offset = start + consumed;
+  for (let i = 0; i < lines.length; i++) {
+    if (i === 0 && isInitialAdd && start > 0) continue;
+    const line = lines[i]!;
     if (line.trim()) onLine(line);
-  });
-  rl.on("close", () => {
-    cursor!.offset = start + consumed;
-  });
+  }
 }
 
 function swallow(err: unknown): void {
