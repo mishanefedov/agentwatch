@@ -31,6 +31,51 @@ That gives you: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
 
 ---
 
+## Timeouts on hang-prone commands (AUR-241 — mandatory)
+
+The cron has a hard 15–17 minute backstop, but a single hung command
+can burn the entire window with nothing to show for it (this happened
+on 2026-04-21: run \`981bbbf1…\` ran for 17m before the cron killed it,
+no per-command logs). **Wrap hang-prone commands with an explicit
+timeout** so the run fails fast and at least delivers a clean
+`[BLOCKED]` Telegram instead of dying silently.
+
+A portable helper that works on stock macOS *and* Linux (no coreutils
+required) — paste it into your shell once at session start:
+
+    wt() {
+      # wt <seconds> <cmd...> — runs cmd with a hard time limit.
+      # Returns 124 on timeout (matches GNU `timeout`).
+      local t=$1; shift
+      perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$t" "$@"
+    }
+
+Use it for every command in the table below. If a command ISN'T in the
+table but you suspect it can hang on TTY/network/auth, add a timeout
+defensively. Cost of being wrong: a 60s wait. Cost of NOT wrapping: a
+15-min run wasted.
+
+| Risky command                                        | Suggested timeout |
+|------------------------------------------------------|-------------------|
+| `openclaw status --usage --json` (STEP 0)            | 30s               |
+| `gh issue list / gh pr list / gh api`                | 60s               |
+| Any single `curl` to api.linear.app or api.telegram  | 30s               |
+| `git fetch origin`                                   | 60s               |
+| `git push`                                           | 120s              |
+| `npm test` / `npm run typecheck`                     | 300s (5m)         |
+| Anything spawning a sub-agent (codex/claude/gemini)  | per the spawn's own ceiling, never unbounded |
+
+Example:
+
+    wt 60 gh issue list --state open --limit 50
+    wt 30 curl -sS -X POST -d "$payload" https://api.telegram.org/...
+
+If `wt` returns 124, treat it as a hard blocker for *that command*.
+Don't retry the same command ≥3× in one run — escalate via Telegram
+`[BLOCKED] cmd timed out: <cmd>` and exit clean per §11.
+
+---
+
 ## STEP 0 — Spend ceiling (do this FIRST, before anything else)
 
 The daily output-token budget across all `agentwatch-daily` sessions is
@@ -40,7 +85,8 @@ already exceeds that, stop immediately.
 Run exactly this, once, at the very start:
 
     TODAY=$(date -u +%Y-%m-%d)
-    TOKENS=$(openclaw status --usage --json | jq --arg d "$TODAY" --arg a agentwatch-daily '
+    # AUR-241: openclaw status hangs on a wedged daemon — bound it.
+    TOKENS=$(wt 30 openclaw status --usage --json | jq --arg d "$TODAY" --arg a agentwatch-daily '
       [.sessions.recent[]
         | select(.agentId == $a)
         | select((.updatedAt / 1000 | strftime("%Y-%m-%d")) == $d)
@@ -51,8 +97,10 @@ Run exactly this, once, at the very start:
       exit 0
     fi
 
-If this fails for any reason (jq parse error, command missing), still
-proceed — the cron 15-min timeout is the backstop.
+If this fails for any reason (jq parse error, command missing,
+\`wt 30\` exit 124), still proceed — the cron 15-min timeout is the
+backstop, and missing the spend check on one run is cheap relative to
+hanging the whole job.
 
 ---
 
