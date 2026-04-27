@@ -1,6 +1,5 @@
 import chokidar from "chokidar";
-import { createReadStream, existsSync, statSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { existsSync, statSync } from "node:fs";
 import { basename, join, sep } from "node:path";
 import os from "node:os";
 import type { AgentEvent, EventSink, EventType } from "../schema.js";
@@ -8,6 +7,7 @@ import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 import { costOf } from "../util/cost.js";
 import { consumeSpawn } from "../util/spawn-tracker.js";
+import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
 
 const BACKFILL_BYTES = 4 * 1024 * 1024;
 
@@ -67,153 +67,143 @@ export function startCodexAdapter(sink: EventSink): () => void {
 
     const start = cursor.offset;
     const sessionId = extractSessionId(file);
-    const stream = createReadStream(file, {
+    const { lines, consumed } = readNewlineTerminatedLines(
+      file,
       start,
-      end: size - 1,
-      encoding: "utf8",
-    });
-    let consumed = 0;
-    let skippedFirst = false;
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
+      size - 1,
+    );
+    cursor.offset = start + consumed;
 
-    rl.on("line", (line) => {
-      consumed += Buffer.byteLength(line, "utf8") + 1;
-      if (isInitialAdd && start > 0 && !skippedFirst) {
-        // First partial line after mid-file seek — skip.
-        skippedFirst = true;
-        return;
-      }
-      if (!line.trim()) return;
+    for (let i = 0; i < lines.length; i++) {
+      if (i === 0 && isInitialAdd && start > 0) continue;
+      const line = lines[i]!;
+      if (!line.trim()) continue;
+      let obj: Record<string, unknown>;
       try {
-        const obj = JSON.parse(line);
-        if (obj.type === "session_meta") {
-          const cwd = obj.payload?.cwd;
-          if (typeof cwd === "string") {
-            cursor!.project = projectOf(cwd);
-            cursor!.cwd = cwd;
-            // AUR-200: was this Codex session spawned by a `codex exec`
-            // call from another agent? If so, the next event we emit
-            // should carry the parent linkage.
-            const ts = typeof obj.timestamp === "string" ? obj.timestamp : "";
-            const parent = consumeSpawn(
-              "codex",
-              cwd,
-              ts ? new Date(ts).getTime() : Date.now(),
-            );
-            if (parent) cursor!.pendingParentSpawnId = parent.parentEventId;
-          }
-          const model = obj.payload?.model;
-          if (typeof model === "string") cursor!.model = model;
-          return;
-        }
-        if (obj.type === "turn_context") {
-          const model = obj.payload?.model;
-          if (typeof model === "string") cursor!.model = model;
-          return;
-        }
-        // Pair event_msg/token_count with the previous response event.
-        if (obj.type === "event_msg") {
-          const usage = extractTokenUsage(obj);
-          if (usage && cursor!.lastResponseId) {
-            const key = `${usage.input}|${usage.cacheRead}|${usage.output}`;
-            if (cursor!.lastUsageKey !== key) {
-              cursor!.lastUsageKey = key;
-              const model = cursor!.model ?? "gpt-5";
-              const cost = costOf(model, usage);
-              sink.enrich(cursor!.lastResponseId, { usage, cost, model });
-            }
-          }
-          // Codex signals compaction via task_started/turn_truncated —
-          // the equivalent of Claude's isCompactSummary.
-          if (isCompactionEvent(obj)) {
-            sink.emit({
-              id: nextId(),
-              ts: clampTs(
-                typeof obj.timestamp === "string"
-                  ? obj.timestamp
-                  : new Date().toISOString(),
-              ),
-              agent: "codex",
-              type: "compaction",
-              sessionId,
-              riskScore: riskOf("compaction"),
-              summary: `[${cursor!.project}] ⋈ context compacted`,
-            });
-          }
-          return;
-        }
-        // Handle function_call_output — pair with a pending tool event.
-        const payload = (obj.payload ?? {}) as Record<string, unknown>;
-        if (
-          obj.type === "response_item" &&
-          payload.type === "function_call_output"
-        ) {
-          const callId =
-            typeof payload.call_id === "string" ? payload.call_id : "";
-          const pend = callId ? cursor!.pendingCalls.get(callId) : undefined;
-          if (pend) {
-            cursor!.pendingCalls.delete(callId);
-            const out = payload.output;
-            const outText =
-              typeof out === "string"
-                ? out
-                : out && typeof out === "object"
-                  ? String(
-                      (out as Record<string, unknown>).content ??
-                        JSON.stringify(out),
-                    )
-                  : "";
-            const isError =
-              !!out &&
-              typeof out === "object" &&
-              (out as Record<string, unknown>).status === "error";
-            const ts = typeof obj.timestamp === "string" ? obj.timestamp : "";
-            const duration = ts
-              ? Math.max(0, new Date(ts).getTime() - pend.startMs)
-              : undefined;
-            sink.enrich(pend.eventId, {
-              toolResult: outText.slice(0, 50_000),
-              toolError: isError,
-              ...(duration != null ? { durationMs: duration } : {}),
-            });
-          }
-          return;
-        }
-
-        const event = translate(obj, sessionId, cursor!.project);
-        if (event) {
-          // AUR-200: stamp the first event of a spawned session with its
-          // parent agent_call event id, then clear the pending pointer.
-          if (cursor!.pendingParentSpawnId) {
-            event.details = {
-              ...(event.details ?? {}),
-              parentSpawnId: cursor!.pendingParentSpawnId,
-            };
-            cursor!.pendingParentSpawnId = undefined;
-          }
-          sink.emit(event);
-          if (event.type === "response") cursor!.lastResponseId = event.id;
-          // Track function_call events by call_id for later pairing.
-          const cid = event.details?.toolUseId;
-          if (cid && event.type !== "response" && event.type !== "prompt") {
-            cursor!.pendingCalls.set(cid, {
-              eventId: event.id,
-              startMs: new Date(event.ts).getTime(),
-            });
-            if (cursor!.pendingCalls.size > MAX_PENDING) {
-              const firstKey = cursor!.pendingCalls.keys().next().value;
-              if (firstKey !== undefined) cursor!.pendingCalls.delete(firstKey);
-            }
-          }
-        }
+        obj = JSON.parse(line) as Record<string, unknown>;
       } catch {
-        /* malformed line */
+        continue;
       }
-    });
+      const payload = (obj.payload ?? {}) as Record<string, unknown>;
+      if (obj.type === "session_meta") {
+        const cwd = payload.cwd;
+        if (typeof cwd === "string") {
+          cursor.project = projectOf(cwd);
+          cursor.cwd = cwd;
+          // AUR-200: was this Codex session spawned by a `codex exec`
+          // call from another agent? If so, the next event we emit
+          // should carry the parent linkage.
+          const ts = typeof obj.timestamp === "string" ? obj.timestamp : "";
+          const parent = consumeSpawn(
+            "codex",
+            cwd,
+            ts ? new Date(ts).getTime() : Date.now(),
+          );
+          if (parent) cursor.pendingParentSpawnId = parent.parentEventId;
+        }
+        const model = payload.model;
+        if (typeof model === "string") cursor.model = model;
+        continue;
+      }
+      if (obj.type === "turn_context") {
+        const model = payload.model;
+        if (typeof model === "string") cursor.model = model;
+        continue;
+      }
+      // Pair event_msg/token_count with the previous response event.
+      if (obj.type === "event_msg") {
+        const usage = extractTokenUsage(obj);
+        if (usage && cursor.lastResponseId) {
+          const key = `${usage.input}|${usage.cacheRead}|${usage.output}`;
+          if (cursor.lastUsageKey !== key) {
+            cursor.lastUsageKey = key;
+            const model = cursor.model ?? "gpt-5";
+            const cost = costOf(model, usage);
+            sink.enrich(cursor.lastResponseId, { usage, cost, model });
+          }
+        }
+        // Codex signals compaction via task_started/turn_truncated —
+        // the equivalent of Claude's isCompactSummary.
+        if (isCompactionEvent(obj)) {
+          sink.emit({
+            id: nextId(),
+            ts: clampTs(
+              typeof obj.timestamp === "string"
+                ? obj.timestamp
+                : new Date().toISOString(),
+            ),
+            agent: "codex",
+            type: "compaction",
+            sessionId,
+            riskScore: riskOf("compaction"),
+            summary: `[${cursor.project}] ⋈ context compacted`,
+          });
+        }
+        continue;
+      }
+      // Handle function_call_output — pair with a pending tool event.
+      if (
+        obj.type === "response_item" &&
+        payload.type === "function_call_output"
+      ) {
+        const callId =
+          typeof payload.call_id === "string" ? payload.call_id : "";
+        const pend = callId ? cursor.pendingCalls.get(callId) : undefined;
+        if (pend) {
+          cursor.pendingCalls.delete(callId);
+          const out = payload.output;
+          const outText =
+            typeof out === "string"
+              ? out
+              : out && typeof out === "object"
+                ? String(
+                    (out as Record<string, unknown>).content ??
+                      JSON.stringify(out),
+                  )
+                : "";
+          const isError =
+            !!out &&
+            typeof out === "object" &&
+            (out as Record<string, unknown>).status === "error";
+          const ts = typeof obj.timestamp === "string" ? obj.timestamp : "";
+          const duration = ts
+            ? Math.max(0, new Date(ts).getTime() - pend.startMs)
+            : undefined;
+          sink.enrich(pend.eventId, {
+            toolResult: outText.slice(0, 50_000),
+            toolError: isError,
+            ...(duration != null ? { durationMs: duration } : {}),
+          });
+        }
+        continue;
+      }
 
-    rl.on("close", () => {
-      cursor!.offset = start + consumed;
-    });
+      const event = translate(obj, sessionId, cursor.project);
+      if (!event) continue;
+      // AUR-200: stamp the first event of a spawned session with its
+      // parent agent_call event id, then clear the pending pointer.
+      if (cursor.pendingParentSpawnId) {
+        event.details = {
+          ...(event.details ?? {}),
+          parentSpawnId: cursor.pendingParentSpawnId,
+        };
+        cursor.pendingParentSpawnId = undefined;
+      }
+      sink.emit(event);
+      if (event.type === "response") cursor.lastResponseId = event.id;
+      // Track function_call events by call_id for later pairing.
+      const cid = event.details?.toolUseId;
+      if (cid && event.type !== "response" && event.type !== "prompt") {
+        cursor.pendingCalls.set(cid, {
+          eventId: event.id,
+          startMs: new Date(event.ts).getTime(),
+        });
+        if (cursor.pendingCalls.size > MAX_PENDING) {
+          const firstKey = cursor.pendingCalls.keys().next().value;
+          if (firstKey !== undefined) cursor.pendingCalls.delete(firstKey);
+        }
+      }
+    }
   };
 
   watcher.on("add", (f) => handle(f, true));
