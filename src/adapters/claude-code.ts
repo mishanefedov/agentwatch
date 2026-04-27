@@ -1,6 +1,5 @@
 import chokidar from "chokidar";
-import { createReadStream, existsSync, statSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { existsSync, statSync } from "node:fs";
 import { basename, sep } from "node:path";
 import type { AgentEvent, EventType, EventSink } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
@@ -10,6 +9,7 @@ import { detectAgentCall } from "../util/agent-call.js";
 import { registerSpawn } from "../util/spawn-tracker.js";
 import { costOf, parseUsage } from "../util/cost.js";
 import { markAgentWrite } from "../util/recent-writes.js";
+import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
 
@@ -76,84 +76,78 @@ export function startClaudeAdapter(sink: Emit): () => void {
     if (size <= cursor.offset) return;
 
     const start = cursor.offset;
-    const stream = createReadStream(file, {
-      start,
-      end: size - 1,
-      encoding: "utf8",
-    });
-
     const sessionId = basename(file, ".jsonl");
     const project = extractProject(file);
     const subAgentId = isSub ? extractSubAgentId(file) : undefined;
-    let consumed = 0;
-    let skippedFirst = false;
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
-    rl.on("line", (line) => {
-      consumed += Buffer.byteLength(line, "utf8") + 1;
-      if (isInitialAdd && start > 0 && !skippedFirst) {
-        skippedFirst = true;
-        return;
-      }
-      if (!line.trim()) return;
+    const { lines, consumed } = readNewlineTerminatedLines(
+      file,
+      start,
+      size - 1,
+    );
+    cursor.offset = start + consumed;
+
+    for (let i = 0; i < lines.length; i++) {
+      // First line after a mid-file seek is a partial line; skip once.
+      if (i === 0 && isInitialAdd && start > 0) continue;
+      const line = lines[i]!;
+      if (!line.trim()) continue;
+      let obj: unknown;
       try {
-        const obj = JSON.parse(line);
-        // First, harvest any tool_result blocks from user turns — they
-        // correlate back to earlier tool_use events by tool_use_id.
-        handleToolResults(obj, enrich);
-
-        const event = translateClaudeLine(obj, sessionId, project, subAgentId);
-        if (event) {
-          emit(event);
-          // AUR-200: when this event invokes a child agent (codex/gemini/…),
-          // register the spawn so we can chain-link the child session.
-          if (event.details?.agentCall) {
-            const cwd =
-              typeof obj.cwd === "string" ? obj.cwd : "";
-            registerSpawn({
-              parentEventId: event.id,
-              callee: event.details.agentCall.callee,
-              cwd,
-              registeredMs: new Date(event.ts).getTime(),
-            });
-          }
-          // Mark attributed writes so the fs-watcher can dedupe.
-          if (
-            event.path &&
-            (event.type === "file_write" || event.type === "file_read")
-          ) {
-            markAgentWrite(event.path, event.ts);
-          }
-          // If this event is a tool_use whose result already arrived
-          // (backfill ordering quirk), attach it immediately.
-          const toolUseId = event.details?.toolUseId;
-          if (toolUseId && orphanResults.has(toolUseId)) {
-            const orphan = orphanResults.get(toolUseId)!;
-            orphanResults.delete(toolUseId);
-            enrich(event.id, {
-              toolResult: orphan.content,
-              toolError: orphan.isError,
-              durationMs: Math.max(
-                0,
-                new Date(orphan.ts).getTime() - new Date(event.ts).getTime(),
-              ),
-            });
-          } else if (toolUseId) {
-            pendingToolUses.set(toolUseId, {
-              eventId: event.id,
-              ts: event.ts,
-            });
-            capMap(pendingToolUses, MAX_PENDING_TOOL_USES);
-          }
-        }
+        obj = JSON.parse(line);
       } catch {
-        // ignore malformed lines
+        continue;
       }
-    });
+      // First, harvest any tool_result blocks from user turns — they
+      // correlate back to earlier tool_use events by tool_use_id.
+      handleToolResults(obj, enrich);
 
-    rl.on("close", () => {
-      cursor!.offset = start + consumed;
-    });
+      const event = translateClaudeLine(obj, sessionId, project, subAgentId);
+      if (!event) continue;
+      emit(event);
+      // AUR-200: when this event invokes a child agent (codex/gemini/…),
+      // register the spawn so we can chain-link the child session.
+      if (event.details?.agentCall) {
+        const cwd =
+          typeof (obj as Record<string, unknown>).cwd === "string"
+            ? ((obj as Record<string, unknown>).cwd as string)
+            : "";
+        registerSpawn({
+          parentEventId: event.id,
+          callee: event.details.agentCall.callee,
+          cwd,
+          registeredMs: new Date(event.ts).getTime(),
+        });
+      }
+      // Mark attributed writes so the fs-watcher can dedupe.
+      if (
+        event.path &&
+        (event.type === "file_write" || event.type === "file_read")
+      ) {
+        markAgentWrite(event.path, event.ts);
+      }
+      // If this event is a tool_use whose result already arrived
+      // (backfill ordering quirk), attach it immediately.
+      const toolUseId = event.details?.toolUseId;
+      if (toolUseId && orphanResults.has(toolUseId)) {
+        const orphan = orphanResults.get(toolUseId)!;
+        orphanResults.delete(toolUseId);
+        enrich(event.id, {
+          toolResult: orphan.content,
+          toolError: orphan.isError,
+          durationMs: Math.max(
+            0,
+            new Date(orphan.ts).getTime() - new Date(event.ts).getTime(),
+          ),
+        });
+      } else if (toolUseId) {
+        pendingToolUses.set(toolUseId, {
+          eventId: event.id,
+          ts: event.ts,
+        });
+        capMap(pendingToolUses, MAX_PENDING_TOOL_USES);
+      }
+    }
   };
 
   watcher.on("add", (f) => process(f, true));
