@@ -13,6 +13,7 @@ import { registerPermissionRoutes } from "./routes/permissions.js";
 import { registerCronRoutes } from "./routes/cron.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerClaudeHooksRoute } from "../adapters/claude-hooks.js";
+import { registerYieldRoutes } from "./routes/yield.js";
 import { registerActivityRoutes } from "./routes/activity.js";
 import type { EventSink } from "../schema.js";
 import type { EventStore } from "../store/sqlite.js";
@@ -162,6 +163,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   registerPermissionRoutes(app);
   registerCronRoutes(app, events);
   registerSearchRoutes(app, events, opts.store);
+  registerYieldRoutes(app, opts.store);
   registerActivityRoutes(app, opts.store);
   // Hooks route reads the sink lazily from the handle so callers can
   // wire it after server start. Until set, the route 404s.
