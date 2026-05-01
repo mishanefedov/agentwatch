@@ -12,6 +12,7 @@ import { registerAgentRoutes } from "./routes/agents.js";
 import { registerPermissionRoutes } from "./routes/permissions.js";
 import { registerCronRoutes } from "./routes/cron.js";
 import { registerSearchRoutes } from "./routes/search.js";
+import { registerYieldRoutes } from "./routes/yield.js";
 import type { EventStore } from "../store/sqlite.js";
 import { registerConfigRoutes } from "./routes/config.js";
 import { registerTrendsRoutes } from "./routes/trends.js";
@@ -154,6 +155,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   registerPermissionRoutes(app);
   registerCronRoutes(app, events);
   registerSearchRoutes(app, events, opts.store);
+  registerYieldRoutes(app, opts.store);
   registerConfigRoutes(app);
   registerTrendsRoutes(app, events);
   registerDiffRoutes(app, events);
