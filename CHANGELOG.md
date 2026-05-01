@@ -10,6 +10,38 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+## [0.0.5] — 2026-05-01
+
+### Added
+- **Externalized pricing** via `~/.agentwatch/pricing.json` (AUR-216) — per-model
+  rates can be overridden without rebuilding the binary; the in-tree defaults
+  are loaded as a fallback when the file is absent.
+- **OpenClaw `toolResult` pairing** (AUR-217) — toolResult turns now back-fill
+  the originating toolCall with output, duration, and error flag, matching
+  Claude/Codex parity.
+- **Unparseable JSONL lines surfaced** as a structured `parse_error` event
+  (AUR-228) instead of being silently swallowed; you now see when an adapter
+  is choking on malformed input.
+
+### Fixed
+- **Partial JSONL lines preserved across reads** (AUR-227) — a chunk boundary
+  in the middle of a line no longer truncates the event; tail buffer holds
+  the partial line until the newline arrives.
+- **Version no longer drifts between `package.json` and runtime** — `--version`
+  reads `package.json` instead of a hardcoded constant.
+- **`bin/agentwatch.js` is executable** in the published tarball
+  (a `chmod +x` was missing from the build).
+
+### Docs
+- Documented that Gemini CLI and OpenClaw do not persist compaction markers
+  to disk (AUR-214) — this is a structural limit of what those agents write,
+  not a missing adapter feature.
+
+### Internal
+- AGENT_DIRECTIVES.md hardening for the autonomous agentwatch-bot harness
+  (AUR-241 timeout wrappers, AUR-242 defensive `last-triage.txt` initializer).
+  These are agent-harness changes only; no user-facing impact.
+
 ## [0.0.3] — 2026-04-15
 
 ### Added — full multi-agent + moats wave
