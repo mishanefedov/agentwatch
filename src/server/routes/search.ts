@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { AgentEvent } from "../../schema.js";
 import { searchAllSessions } from "../../util/cross-search.js";
+import type { EventStore } from "../../store/sqlite.js";
 
 interface SearchBody {
   query: string;
-  mode?: "live" | "cross" | "semantic";
+  mode?: "live" | "cross" | "semantic" | "history";
   limit?: number;
   /** Optional ISO timestamps narrowing the window (cross mode only — live
    *  is ring-buffer scoped already). */
@@ -17,7 +18,11 @@ interface SearchBody {
 /* Timestamp extraction lives in cross-search.ts/sniffTs — hits carry
  * a `ts` field when the JSONL line included one. */
 
-export function registerSearchRoutes(app: FastifyInstance, events: AgentEvent[]): void {
+export function registerSearchRoutes(
+  app: FastifyInstance,
+  events: AgentEvent[],
+  store?: EventStore,
+): void {
   app.post<{ Body: SearchBody }>("/api/search", async (req, reply) => {
     const query = (req.body?.query ?? "").trim();
     const mode = req.body?.mode ?? "live";
@@ -36,6 +41,29 @@ export function registerSearchRoutes(app: FastifyInstance, events: AgentEvent[])
         if (matchesLive(e, needle)) hits.push(e);
       }
       return { mode, hits: hits.map((e) => ({ kind: "live" as const, event: e })) };
+    }
+
+    if (mode === "history") {
+      if (!store) {
+        return {
+          mode,
+          hits: [],
+          status: "history mode requires a SQLite store — pass --no-web off and ensure ~/.agentwatch is writable",
+        };
+      }
+      const hits = store.searchFts(query, { limit }).map((h) => ({
+        kind: "history" as const,
+        hit: {
+          eventId: h.eventId,
+          sessionId: h.sessionId,
+          agent: h.agent,
+          ts: h.ts,
+          type: h.type,
+          snippet: h.snippet,
+          rank: h.rank,
+        },
+      }));
+      return { mode, hits };
     }
 
     if (mode === "cross") {
