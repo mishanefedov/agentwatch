@@ -22,6 +22,8 @@ Usage:
   agentwatch serve          run only the web server (no TUI, for remote boxes)
   agentwatch doctor         detect installed agents and print readiness
   agentwatch mcp            run as an MCP server over stdio
+  agentwatch daemon ...     install + manage the background capture service
+                              (subcommands: start | stop | status | logs)
   agentwatch prune          drop events older than --older-than-days (default 90)
   agentwatch --help         show this help
 
@@ -58,6 +60,13 @@ if (arg === "mcp") {
     process.stderr.write(`[agentwatch] mcp error: ${String(err)}\n`);
     process.exit(1);
   }
+  process.exit(0);
+}
+
+if (arg === "daemon") {
+  const { dispatchDaemon } = await import("./daemon/index.js");
+  await dispatchDaemon(process.argv[3]);
+  // dispatchDaemon either exits or runs forever; if it returns we're done.
   process.exit(0);
 }
 
@@ -152,7 +161,9 @@ if (arg === "serve") {
       server.broadcaster.emitEnrich(eventId, patch);
     },
   };
-  const sink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const { withClassifier } = await import("./classify/index.js");
+  const persistSink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const sink = withClassifier(persistSink);
   const adapters = startAllAdapters(sink, workspace);
   onShutdown(() => stopAllAdapters(adapters));
   onShutdown(() => server.stop());

@@ -26,6 +26,15 @@ layout can change freely within a minor version.
 - **Search history mode** — `POST /api/search` with `mode: "history"`
   hits the FTS5 index for full-history matches (vs the live ring buffer
   or the JSONL cross-scan). Returns FTS-ranked snippets.
+- **Background daemon** (AUR-262) — `agentwatch daemon start | stop |
+  status | logs` installs a launchd LaunchAgent (macOS) or a systemd
+  user unit (Linux) that runs the adapter pipeline 24/7, writing every
+  event into `~/.agentwatch/events.db`. The TUI and `agentwatch serve`
+  are now read clients of the same store, so events captured overnight
+  are visible the moment you open them. PID file + start-time at
+  `~/.agentwatch/daemon.{pid,started_at}`; log at
+  `~/.agentwatch/daemon.log` with a 10 MB single-slot rotation; PID
+  re-acquire is stale-PID-aware (process-alive probe).
 
 ### Changed
 
@@ -33,6 +42,38 @@ layout can change freely within a minor version.
   every emit/enrich is now mirrored to SQLite. Failures are logged once
   and never propagated; the in-memory pipeline remains the source of
   truth for the live SSE stream.
+
+## [0.0.5] — 2026-05-01
+
+### Added
+- **Externalized pricing** via `~/.agentwatch/pricing.json` (AUR-216) — per-model
+  rates can be overridden without rebuilding the binary; the in-tree defaults
+  are loaded as a fallback when the file is absent.
+- **OpenClaw `toolResult` pairing** (AUR-217) — toolResult turns now back-fill
+  the originating toolCall with output, duration, and error flag, matching
+  Claude/Codex parity.
+- **Unparseable JSONL lines surfaced** as a structured `parse_error` event
+  (AUR-228) instead of being silently swallowed; you now see when an adapter
+  is choking on malformed input.
+
+### Fixed
+- **Partial JSONL lines preserved across reads** (AUR-227) — a chunk boundary
+  in the middle of a line no longer truncates the event; tail buffer holds
+  the partial line until the newline arrives.
+- **Version no longer drifts between `package.json` and runtime** — `--version`
+  reads `package.json` instead of a hardcoded constant.
+- **`bin/agentwatch.js` is executable** in the published tarball
+  (a `chmod +x` was missing from the build).
+
+### Docs
+- Documented that Gemini CLI and OpenClaw do not persist compaction markers
+  to disk (AUR-214) — this is a structural limit of what those agents write,
+  not a missing adapter feature.
+
+### Internal
+- AGENT_DIRECTIVES.md hardening for the autonomous agentwatch-bot harness
+  (AUR-241 timeout wrappers, AUR-242 defensive `last-triage.txt` initializer).
+  These are agent-harness changes only; no user-facing impact.
 
 ## [0.0.3] — 2026-04-15
 
