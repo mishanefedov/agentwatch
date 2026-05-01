@@ -103,6 +103,22 @@ export interface EventDetails {
   parseErrorCount?: number;
   /** Truncated preview of the most recent unparseable line. */
   parseErrorSample?: string;
+  /** Activity category — one of ACTIVITY_CATEGORIES. Heuristically assigned
+   *  on emit by the classify wrapper (AUR-264). Used by the per-session
+   *  and per-project activity views to answer "where is my spend going?". */
+  category?:
+    | "coding"
+    | "debugging"
+    | "exploration"
+    | "planning"
+    | "refactor"
+    | "testing"
+    | "docs"
+    | "chat"
+    | "config"
+    | "review"
+    | "devops"
+    | "research";
 }
 
 /** Sink passed to adapters. Adapters emit new events and may later

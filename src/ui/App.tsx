@@ -25,6 +25,8 @@ import { initialState, matchesQuery, reducer } from "./state.js";
 import { startServer, type ServerHandle, addEventToServer } from "../server/index.js";
 import { openUrl } from "../util/open-url.js";
 import { onShutdown } from "../util/shutdown.js";
+import { openStore, wrapSinkWithStore, type EventStore } from "../store/index.js";
+import { withClassifier } from "../classify/index.js";
 
 /**
  * agentwatch TUI — live log tail.
@@ -45,11 +47,35 @@ export function App() {
   const { stdout } = useStdout();
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [server, setServer] = useState<ServerHandle | null>(null);
+  const [store, setStore] = useState<EventStore | null>(null);
   const noWeb = process.argv.includes("--no-web");
+
+  // Persistent SQLite store — opened once, drains on shutdown. Failure to
+  // open (e.g. read-only home dir) leaves store=null; the rest of the TUI
+  // continues to work against the in-memory ring buffer.
+  useEffect(() => {
+    let s: EventStore | null = null;
+    let unregister: (() => void) | null = null;
+    try {
+      s = openStore();
+      setStore(s);
+      unregister = onShutdown(() => s?.close());
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[agentwatch] event store unavailable: ${String(err)}`);
+    }
+    return () => {
+      unregister?.();
+      if (s) {
+        try { s.close(); } catch { /* already closed */ }
+      }
+    };
+  }, []);
 
   // Server lifecycle — started once, lives as long as the TUI does.
   useEffect(() => {
     if (noWeb) return;
+    if (!store) return; // wait for the store before starting the server
     const events: AgentEvent[] = [];
     const port = Number(
       findFlag("--port") ?? process.env.AGENTWATCH_PORT ?? 3456,
@@ -58,7 +84,7 @@ export function App() {
     let handle: ServerHandle | null = null;
     let cancelled = false;
     let unregister: (() => void) | null = null;
-    startServer({ host, port, events })
+    startServer({ host, port, events, store })
       .then((h) => {
         if (cancelled) {
           void h.stop();
@@ -77,7 +103,7 @@ export function App() {
       unregister?.();
       if (handle) void handle.stop();
     };
-  }, []);
+  }, [store]);
 
   useEffect(() => {
     const stopTriggersWatch = watchTriggers();
@@ -133,7 +159,9 @@ export function App() {
         }
       },
     };
-    const adapters = startAllAdapters(sink, workspace);
+    const persistSink = store ? wrapSinkWithStore(sink, store) : sink;
+    const finalSink = withClassifier(persistSink);
+    const adapters = startAllAdapters(finalSink, workspace);
     const unregisterShutdown = onShutdown(() => {
       flush();
       stopAllAdapters(adapters);
@@ -145,7 +173,7 @@ export function App() {
       stopAllAdapters(adapters);
       stopTriggersWatch();
     };
-  }, [workspace, server]);
+  }, [workspace, server, store]);
 
   const agentFiltered = state.filterAgent
     ? state.events.filter((e) => e.agent === state.filterAgent)

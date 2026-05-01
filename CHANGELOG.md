@@ -10,6 +10,39 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+### Added — v0.1 foundation
+
+- **SQLite event store** (AUR-263) at `~/.agentwatch/events.db` — replaces
+  the 4 MB rolling backfill with a persistent indexed store. WAL mode
+  + `synchronous=NORMAL` + FTS5 virtual table over prompt/response/
+  thinking/tool_result/summary. Migrations are versioned (`schema_version`
+  table). Three tables: `events` (canonical AgentEvent), `sessions`
+  (auto-aggregated via trigger on event insert: cost, ts range, count,
+  project), `tool_calls` (tool, duration, error). Bench: ingests 10k
+  events in ~430ms on M1 air.
+- **`agentwatch prune --older-than-days N`** — drops events older than
+  the cutoff (default 90 days), VACUUMs the DB on non-trivial prunes,
+  prints the resulting size.
+- **Search history mode** — `POST /api/search` with `mode: "history"`
+  hits the FTS5 index for full-history matches (vs the live ring buffer
+  or the JSONL cross-scan). Returns FTS-ranked snippets.
+- **Background daemon** (AUR-262) — `agentwatch daemon start | stop |
+  status | logs` installs a launchd LaunchAgent (macOS) or a systemd
+  user unit (Linux) that runs the adapter pipeline 24/7, writing every
+  event into `~/.agentwatch/events.db`. The TUI and `agentwatch serve`
+  are now read clients of the same store, so events captured overnight
+  are visible the moment you open them. PID file + start-time at
+  `~/.agentwatch/daemon.{pid,started_at}`; log at
+  `~/.agentwatch/daemon.log` with a 10 MB single-slot rotation; PID
+  re-acquire is stale-PID-aware (process-alive probe).
+
+### Changed
+
+- **EventSink wired through the store** in both TUI and `serve` modes —
+  every emit/enrich is now mirrored to SQLite. Failures are logged once
+  and never propagated; the in-memory pipeline remains the source of
+  truth for the live SSE stream.
+
 ## [0.0.5] — 2026-05-01
 
 ### Added
