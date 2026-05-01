@@ -8,5 +8,6 @@ export {
   type ListSessionsOptions,
   type PruneResult,
   type StoreStats,
+  type ActivityBucket,
 } from "./sqlite.js";
 export { wrapSinkWithStore } from "./wire.js";

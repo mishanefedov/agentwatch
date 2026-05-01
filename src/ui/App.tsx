@@ -27,6 +27,7 @@ import { openUrl } from "../util/open-url.js";
 import { onShutdown } from "../util/shutdown.js";
 import { openStore, wrapSinkWithStore, type EventStore } from "../store/index.js";
 import { withClaudeHookDedup } from "../adapters/hooks-dedup.js";
+import { withClassifier } from "../classify/index.js";
 
 /**
  * agentwatch TUI — live log tail.
@@ -163,7 +164,8 @@ export function App() {
       },
     };
     const persistSink = store ? wrapSinkWithStore(sink, store) : sink;
-    const finalSink = withClaudeHookDedup(persistSink);
+    const classifiedSink = withClassifier(persistSink);
+    const finalSink = withClaudeHookDedup(classifiedSink);
     if (server) {
       // Hooks route forwards Claude hook curls into the same pipeline
       // as JSONL events. The dedup wrapper at the head of the chain

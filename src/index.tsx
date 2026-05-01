@@ -22,6 +22,8 @@ Usage:
   agentwatch serve          run only the web server (no TUI, for remote boxes)
   agentwatch doctor         detect installed agents and print readiness
   agentwatch mcp            run as an MCP server over stdio
+  agentwatch daemon ...     install + manage the background capture service
+                              (subcommands: start | stop | status | logs)
   agentwatch hooks ...      install / uninstall / status the Claude Code hooks adapter
   agentwatch prune          drop events older than --older-than-days (default 90)
   agentwatch --help         show this help
@@ -59,6 +61,13 @@ if (arg === "mcp") {
     process.stderr.write(`[agentwatch] mcp error: ${String(err)}\n`);
     process.exit(1);
   }
+  process.exit(0);
+}
+
+if (arg === "daemon") {
+  const { dispatchDaemon } = await import("./daemon/index.js");
+  await dispatchDaemon(process.argv[3]);
+  // dispatchDaemon either exits or runs forever; if it returns we're done.
   process.exit(0);
 }
 
@@ -208,9 +217,11 @@ if (arg === "serve") {
       server.broadcaster.emitEnrich(eventId, patch);
     },
   };
-  const persistSink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const { withClassifier } = await import("./classify/index.js");
   const { withClaudeHookDedup } = await import("./adapters/hooks-dedup.js");
-  const sink = withClaudeHookDedup(persistSink);
+  const persistSink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const classifiedSink = withClassifier(persistSink);
+  const sink = withClaudeHookDedup(classifiedSink);
   server.setHookSink(sink);
   const adapters = startAllAdapters(sink, workspace);
   onShutdown(() => stopAllAdapters(adapters));

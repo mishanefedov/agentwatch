@@ -1,5 +1,11 @@
 # Claude Code native hooks (AUR-266)
 
+## Contract
+
+**GOAL:** Capture every Claude Code lifecycle event in real time via the official hooks API, alongside JSONL tailing.
+**USER_VALUE:** Sub-1-second visibility into what Claude is doing — destructive `rm`, `.env` reads, prompt submits — instead of waiting on file-watcher debounces. Operators who run multiple Claude sessions can react before damage lands.
+**COUNTERFACTUAL:** Without it, every Claude observation is delayed 1–2 seconds by JSONL polling and we miss sub-events that never reach the transcript.
+
 Claude Code ships a hooks API that runs a configured shell command on
 every important event in the agent lifecycle (`SessionStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `PreCompact`,
