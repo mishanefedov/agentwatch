@@ -22,6 +22,7 @@ Usage:
   agentwatch serve          run only the web server (no TUI, for remote boxes)
   agentwatch doctor         detect installed agents and print readiness
   agentwatch mcp            run as an MCP server over stdio
+  agentwatch hooks ...      install / uninstall / status the Claude Code hooks adapter
   agentwatch prune          drop events older than --older-than-days (default 90)
   agentwatch --help         show this help
 
@@ -61,6 +62,51 @@ if (arg === "mcp") {
   process.exit(0);
 }
 
+if (arg === "hooks") {
+  const sub = process.argv[3];
+  const {
+    installClaudeHooks,
+    uninstallClaudeHooks,
+    claudeHooksStatus,
+  } = await import("./adapters/claude-hooks-install.js");
+  if (sub === "install") {
+    const port = Number(parseFlag("--port") ?? process.env.AGENTWATCH_PORT ?? "3456");
+    const result = installClaudeHooks({ port });
+    console.log(`installed agentwatch hooks into ${result.settingsPath}`);
+    console.log(`events: ${result.installedEvents.join(", ")}`);
+    if (result.alreadyManaged) {
+      console.log(`(replaced previously-installed agentwatch stanzas)`);
+    }
+    process.exit(0);
+  }
+  if (sub === "uninstall") {
+    const result = uninstallClaudeHooks();
+    if (result.removedEvents.length === 0) {
+      console.log(`no agentwatch hook stanzas found in ${result.settingsPath}`);
+    } else {
+      console.log(`removed ${result.removedEvents.length} hook stanzas from ${result.settingsPath}`);
+      console.log(`events: ${result.removedEvents.join(", ")}`);
+    }
+    process.exit(0);
+  }
+  if (sub === "status" || sub === undefined) {
+    const status = claudeHooksStatus();
+    console.log(`claude hooks: ${status.status}`);
+    console.log(`settings: ${status.settingsPath}`);
+    if (status.managedEvents.length > 0) {
+      console.log(`installed: ${status.managedEvents.join(", ")}`);
+    }
+    if (status.missingEvents.length > 0) {
+      console.log(`missing:   ${status.missingEvents.join(", ")}`);
+    }
+    process.exit(0);
+  }
+  process.stderr.write(
+    `agentwatch hooks: unknown subcommand "${sub}" (use install | uninstall | status)\n`,
+  );
+  process.exit(2);
+}
+
 if (arg === "prune") {
   const { openStore } = await import("./store/index.js");
   const days = Number(parseFlag("--older-than-days") ?? "90");
@@ -84,6 +130,7 @@ if (arg === "prune") {
 if (arg === "doctor") {
   const { detectAgents } = await import("./adapters/detect.js");
   const { detectWorkspaceRoot } = await import("./util/workspace.js");
+  const { claudeHooksStatus } = await import("./adapters/claude-hooks-install.js");
   const agents = detectAgents();
   console.log(`workspace: ${detectWorkspaceRoot()}\n`);
   console.log("agents:");
@@ -104,6 +151,15 @@ if (arg === "doctor") {
     for (const a of notInstrumented) {
       console.log(`  - ${a.label}`);
     }
+  }
+  console.log("");
+  const hooks = claudeHooksStatus();
+  console.log(`claude code hooks: ${hooks.status}`);
+  if (hooks.status === "partial") {
+    console.log(`  missing: ${hooks.missingEvents.join(", ")}`);
+  }
+  if (hooks.status !== "installed") {
+    console.log(`  install with: agentwatch hooks install`);
   }
   process.exit(0);
 }
@@ -152,7 +208,10 @@ if (arg === "serve") {
       server.broadcaster.emitEnrich(eventId, patch);
     },
   };
-  const sink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const persistSink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const { withClaudeHookDedup } = await import("./adapters/hooks-dedup.js");
+  const sink = withClaudeHookDedup(persistSink);
+  server.setHookSink(sink);
   const adapters = startAllAdapters(sink, workspace);
   onShutdown(() => stopAllAdapters(adapters));
   onShutdown(() => server.stop());

@@ -26,6 +26,7 @@ import { startServer, type ServerHandle, addEventToServer } from "../server/inde
 import { openUrl } from "../util/open-url.js";
 import { onShutdown } from "../util/shutdown.js";
 import { openStore, wrapSinkWithStore, type EventStore } from "../store/index.js";
+import { withClaudeHookDedup } from "../adapters/hooks-dedup.js";
 
 /**
  * agentwatch TUI — live log tail.
@@ -83,6 +84,9 @@ export function App() {
     let handle: ServerHandle | null = null;
     let cancelled = false;
     let unregister: (() => void) | null = null;
+    // hookSink is wired in the second useEffect once adapters are up.
+    // Until then, hook POSTs return 404 — that's fine; the hook curls
+    // exit 0 on failure and never block Claude.
     startServer({ host, port, events, store })
       .then((h) => {
         if (cancelled) {
@@ -158,7 +162,14 @@ export function App() {
         }
       },
     };
-    const finalSink = store ? wrapSinkWithStore(sink, store) : sink;
+    const persistSink = store ? wrapSinkWithStore(sink, store) : sink;
+    const finalSink = withClaudeHookDedup(persistSink);
+    if (server) {
+      // Hooks route forwards Claude hook curls into the same pipeline
+      // as JSONL events. The dedup wrapper at the head of the chain
+      // distinguishes hook events (bypass) from JSONL events (check).
+      server.setHookSink(finalSink);
+    }
     const adapters = startAllAdapters(finalSink, workspace);
     const unregisterShutdown = onShutdown(() => {
       flush();
