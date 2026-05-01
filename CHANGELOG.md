@@ -27,6 +27,16 @@ layout can change freely within a minor version.
   hits the FTS5 index for full-history matches (vs the live ring buffer
   or the JSONL cross-scan). Returns FTS-ranked snippets.
 
+- **Background daemon** (AUR-262) — `agentwatch daemon start | stop |
+  status | logs` installs a launchd LaunchAgent (macOS) or a systemd
+  user unit (Linux) that runs the adapter pipeline 24/7, writing every
+  event into `~/.agentwatch/events.db`. The TUI and `agentwatch serve`
+  are now read clients of the same store, so events captured overnight
+  are visible the moment you open them. PID file + start-time at
+  `~/.agentwatch/daemon.{pid,started_at}`; log at
+  `~/.agentwatch/daemon.log` with a 10 MB single-slot rotation; PID
+  re-acquire is stale-PID-aware (process-alive probe).
+
 ### Changed
 
 - **EventSink wired through the store** in both TUI and `serve` modes —
