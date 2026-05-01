@@ -12,8 +12,10 @@ import { registerAgentRoutes } from "./routes/agents.js";
 import { registerPermissionRoutes } from "./routes/permissions.js";
 import { registerCronRoutes } from "./routes/cron.js";
 import { registerSearchRoutes } from "./routes/search.js";
+import { registerClaudeHooksRoute } from "../adapters/claude-hooks.js";
 import { registerYieldRoutes } from "./routes/yield.js";
 import { registerActivityRoutes } from "./routes/activity.js";
+import type { EventSink } from "../schema.js";
 import type { EventStore } from "../store/sqlite.js";
 import { registerConfigRoutes } from "./routes/config.js";
 import { registerTrendsRoutes } from "./routes/trends.js";
@@ -42,6 +44,11 @@ export interface ServerHandle {
    *  in-memory ring buffer remains the source of truth for the SSE live
    *  stream. */
   store?: EventStore;
+  /** Set after adapters start so the Claude hooks route has somewhere
+   *  to forward incoming hook payloads. Until set, the hooks route
+   *  responds with `{ok:false, reason:"hooks not ready"}` — the hook
+   *  curl exits 0 either way so Claude never blocks. */
+  setHookSink: (sink: EventSink) => void;
   stop: () => Promise<void>;
 }
 
@@ -158,6 +165,13 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   registerSearchRoutes(app, events, opts.store);
   registerYieldRoutes(app, opts.store);
   registerActivityRoutes(app, opts.store);
+  // Hooks route reads the sink lazily from the handle so callers can
+  // wire it after server start. Until set, the route 404s.
+  let hookSink: EventSink | null = null;
+  registerClaudeHooksRoute(app, {
+    emit: (event) => hookSink?.emit(event),
+    enrich: (id, patch) => hookSink?.enrich(id, patch),
+  });
   registerConfigRoutes(app);
   registerTrendsRoutes(app, events);
   registerDiffRoutes(app, events);
@@ -192,6 +206,9 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     events,
     rebuildFlat,
     store: opts.store,
+    setHookSink: (sink) => {
+      hookSink = sink;
+    },
     stop: async () => {
       broadcaster.closeAll();
       await app.close();
