@@ -12,6 +12,7 @@ import { registerAgentRoutes } from "./routes/agents.js";
 import { registerPermissionRoutes } from "./routes/permissions.js";
 import { registerCronRoutes } from "./routes/cron.js";
 import { registerSearchRoutes } from "./routes/search.js";
+import type { EventStore } from "../store/sqlite.js";
 import { registerConfigRoutes } from "./routes/config.js";
 import { registerTrendsRoutes } from "./routes/trends.js";
 import { registerDiffRoutes } from "./routes/diffs.js";
@@ -34,6 +35,11 @@ export interface ServerHandle {
   events: AgentEvent[];
   /** Rebuild `events` from `byAgent`. Cheap enough at our scale. */
   rebuildFlat: () => void;
+  /** Persistent SQLite store, if one was passed at startup. Routes that
+   *  need full history (e.g. search history mode) read from this; the
+   *  in-memory ring buffer remains the source of truth for the SSE live
+   *  stream. */
+  store?: EventStore;
   stop: () => Promise<void>;
 }
 
@@ -41,6 +47,7 @@ export interface StartServerOptions {
   host?: string;
   port?: number;
   events?: AgentEvent[]; // optional; kept for back-compat
+  store?: EventStore;
 }
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -146,7 +153,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   registerAgentRoutes(app, events, byAgent);
   registerPermissionRoutes(app);
   registerCronRoutes(app, events);
-  registerSearchRoutes(app, events);
+  registerSearchRoutes(app, events, opts.store);
   registerConfigRoutes(app);
   registerTrendsRoutes(app, events);
   registerDiffRoutes(app, events);
@@ -180,6 +187,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     byAgent,
     events,
     rebuildFlat,
+    store: opts.store,
     stop: async () => {
       broadcaster.closeAll();
       await app.close();

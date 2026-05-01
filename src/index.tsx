@@ -22,6 +22,7 @@ Usage:
   agentwatch serve          run only the web server (no TUI, for remote boxes)
   agentwatch doctor         detect installed agents and print readiness
   agentwatch mcp            run as an MCP server over stdio
+  agentwatch prune          drop events older than --older-than-days (default 90)
   agentwatch --help         show this help
 
 Flags:
@@ -57,6 +58,26 @@ if (arg === "mcp") {
     process.stderr.write(`[agentwatch] mcp error: ${String(err)}\n`);
     process.exit(1);
   }
+  process.exit(0);
+}
+
+if (arg === "prune") {
+  const { openStore } = await import("./store/index.js");
+  const days = Number(parseFlag("--older-than-days") ?? "90");
+  if (!Number.isFinite(days) || days < 0) {
+    process.stderr.write(
+      `[agentwatch] prune: --older-than-days must be a non-negative number, got ${days}\n`,
+    );
+    process.exit(2);
+  }
+  const store = openStore();
+  const result = store.prune({ olderThanDays: days });
+  const stats = store.stats();
+  store.close();
+  console.log(
+    `pruned ${result.deletedEvents} events / ${result.deletedSessions} sessions older than ${days}d ` +
+      `(${stats.events} events / ${stats.sessions} sessions / ${(stats.dbBytes / 1_048_576).toFixed(1)} MB remaining)`,
+  );
   process.exit(0);
 }
 
@@ -96,12 +117,25 @@ if (arg === "serve") {
   );
   const { detectWorkspaceRoot } = await import("./util/workspace.js");
   const { clampTs } = await import("./schema.js");
+  const { openStore, wrapSinkWithStore } = await import("./store/index.js");
   const workspace = detectWorkspaceRoot();
   const host = parseFlag("--host") ?? process.env.AGENTWATCH_HOST ?? "127.0.0.1";
   const port = Number(parseFlag("--port") ?? process.env.AGENTWATCH_PORT ?? 3456);
   const { addEventToServer } = await import("./server/index.js");
-  const server = await startServer({ host, port });
-  const sink = {
+  let store: ReturnType<typeof openStore> | null = null;
+  try {
+    store = openStore();
+  } catch (err) {
+    process.stderr.write(
+      `[agentwatch] event store unavailable: ${String(err)}\n`,
+    );
+  }
+  const server = await startServer({
+    host,
+    port,
+    ...(store ? { store } : {}),
+  });
+  const innerSink = {
     emit: (e: import("./schema.js").AgentEvent) => {
       e.ts = clampTs(e.ts);
       addEventToServer(server, e);
@@ -118,9 +152,11 @@ if (arg === "serve") {
       server.broadcaster.emitEnrich(eventId, patch);
     },
   };
+  const sink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
   const adapters = startAllAdapters(sink, workspace);
   onShutdown(() => stopAllAdapters(adapters));
   onShutdown(() => server.stop());
+  if (store) onShutdown(() => store?.close());
   process.stderr.write(`[agentwatch] serving ${server.url}\n`);
   // Signal handling happens at the bottom of this file via the global
   // shutdown-hooks wiring; the serve path just registers its cleanup.
