@@ -52,6 +52,12 @@ export interface StoreStats {
   schemaVersion: number;
 }
 
+export interface ActivityBucket {
+  category: string;
+  eventCount: number;
+  costUsd: number;
+}
+
 export interface EventStore {
   insert(event: AgentEvent): void;
   insertMany(events: AgentEvent[]): void;
@@ -62,12 +68,16 @@ export interface EventStore {
   listSessions(opts?: ListSessionsOptions): SessionSummary[];
   listProjects(): ProjectSummary[];
   searchFts(query: string, opts?: { limit?: number }): FtsHit[];
+  /** Per-category event count + cost for a single session. */
+  activityBySession(sessionId: string): ActivityBucket[];
+  /** Per-category event count + cost across every session in a project. */
+  activityByProject(projectName: string): ActivityBucket[];
   prune(opts: { olderThanDays: number }): PruneResult;
   stats(): StoreStats;
   close(): void;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export const DEFAULT_DB_PATH = join(homedir(), ".agentwatch", "events.db");
 
@@ -93,10 +103,26 @@ function applyMigrations(db: Database.Database): void {
     .get() as { version: number } | undefined;
   const current = row?.version ?? 0;
   if (current < 1) applyV1(db);
-  // Future versions: if (current < 2) applyV2(db);
+  if (current < 2) applyV2(db);
   db.prepare(
     "INSERT OR REPLACE INTO schema_version (version) VALUES (?)",
   ).run(SCHEMA_VERSION);
+}
+
+function applyV2(db: Database.Database): void {
+  // AUR-264: per-event activity category. ALTER TABLE adds the column;
+  // FTS5 doesn't reference category so the existing triggers stay valid.
+  // Idempotent — duplicate-column on a re-applied migration is swallowed.
+  try {
+    db.exec(`ALTER TABLE events ADD COLUMN category TEXT`);
+  } catch (err) {
+    if (!String(err).includes("duplicate column name")) throw err;
+  }
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_events_category ON events(category)`);
+  } catch {
+    // best effort
+  }
 }
 
 function applyV1(db: Database.Database): void {
@@ -203,14 +229,14 @@ function buildStore(db: Database.Database): EventStore {
       session_id, prompt_id, risk_score, project, details_json,
       full_text, thinking, tool_input_json, tool_result,
       cost_usd, model, duration_ms, tool_error,
-      sub_agent_id, parent_spawn_id
+      sub_agent_id, parent_spawn_id, category
     )
     VALUES (
       @id, @ts, @agent, @type, @path, @cmd, @tool, @summary,
       @session_id, @prompt_id, @risk_score, @project, @details_json,
       @full_text, @thinking, @tool_input_json, @tool_result,
       @cost_usd, @model, @duration_ms, @tool_error,
-      @sub_agent_id, @parent_spawn_id
+      @sub_agent_id, @parent_spawn_id, @category
     )
   `);
 
@@ -260,6 +286,7 @@ function buildStore(db: Database.Database): EventStore {
       tool_error: d.toolError == null ? null : d.toolError ? 1 : 0,
       sub_agent_id: d.subAgentId ?? null,
       parent_spawn_id: d.parentSpawnId ?? null,
+      category: d.category ?? null,
     };
     const info = insertStmt.run(params);
     if (info.changes > 0 && event.tool) {
@@ -469,6 +496,52 @@ function buildStore(db: Database.Database): EventStore {
         snippet: r.snip,
         rank: r.rank,
       }));
+    },
+    activityBySession(sessionId) {
+      const rows = db
+        .prepare(
+          `SELECT COALESCE(category, 'chat') AS category,
+                  COUNT(*) AS event_count,
+                  COALESCE(SUM(cost_usd), 0) AS cost_total
+           FROM events
+           WHERE session_id = ?
+           GROUP BY COALESCE(category, 'chat')`,
+        )
+        .all(sessionId) as Array<{
+        category: string;
+        event_count: number;
+        cost_total: number;
+      }>;
+      return rows
+        .map((r) => ({
+          category: r.category,
+          eventCount: r.event_count,
+          costUsd: r.cost_total,
+        }))
+        .sort((a, b) => b.eventCount - a.eventCount);
+    },
+    activityByProject(projectName) {
+      const rows = db
+        .prepare(
+          `SELECT COALESCE(category, 'chat') AS category,
+                  COUNT(*) AS event_count,
+                  COALESCE(SUM(cost_usd), 0) AS cost_total
+           FROM events
+           WHERE project = ?
+           GROUP BY COALESCE(category, 'chat')`,
+        )
+        .all(projectName) as Array<{
+        category: string;
+        event_count: number;
+        cost_total: number;
+      }>;
+      return rows
+        .map((r) => ({
+          category: r.category,
+          eventCount: r.event_count,
+          costUsd: r.cost_total,
+        }))
+        .sort((a, b) => b.eventCount - a.eventCount);
     },
     prune({ olderThanDays }) {
       const cutoffMs = Date.now() - olderThanDays * 86_400_000;

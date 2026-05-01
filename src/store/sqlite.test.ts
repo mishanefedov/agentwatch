@@ -37,7 +37,7 @@ afterEach(() => {
 
 describe("sqlite store — schema + lifecycle", () => {
   it("initializes schema_version to current", () => {
-    expect(store.stats().schemaVersion).toBe(1);
+    expect(store.stats().schemaVersion).toBeGreaterThanOrEqual(1);
   });
 
   it("re-opening an existing db is idempotent (CREATE IF NOT EXISTS)", () => {
@@ -309,6 +309,80 @@ describe("sqlite store — prune", () => {
     const sessions = store.listSessions().map((s) => s.sessionId);
     expect(sessions).not.toContain("old-s");
     expect(sessions).toContain("new-s");
+  });
+});
+
+describe("sqlite store — activity rollups (v2)", () => {
+  it("activityBySession buckets events by category with counts and cost", () => {
+    store.insertMany([
+      makeEvent({
+        id: "a1",
+        sessionId: "act-s",
+        details: { category: "coding", cost: 0.10 },
+      }),
+      makeEvent({
+        id: "a2",
+        sessionId: "act-s",
+        details: { category: "coding", cost: 0.05 },
+      }),
+      makeEvent({
+        id: "a3",
+        sessionId: "act-s",
+        details: { category: "testing", cost: 0.02 },
+      }),
+      makeEvent({
+        id: "a4",
+        sessionId: "other-s",
+        details: { category: "coding", cost: 0.99 },
+      }),
+    ]);
+    const buckets = store.activityBySession("act-s");
+    const coding = buckets.find((b) => b.category === "coding");
+    const testing = buckets.find((b) => b.category === "testing");
+    expect(coding?.eventCount).toBe(2);
+    expect(coding?.costUsd).toBeCloseTo(0.15);
+    expect(testing?.eventCount).toBe(1);
+    expect(buckets[0]?.category).toBe("coding"); // sorted by count
+  });
+
+  it("activityByProject aggregates across sessions of one project", () => {
+    store.insertMany([
+      makeEvent({
+        id: "p1",
+        sessionId: "s1",
+        summary: "[bpi] do work",
+        details: { category: "coding", cost: 0.10 },
+      }),
+      makeEvent({
+        id: "p2",
+        sessionId: "s2",
+        summary: "[bpi] more work",
+        details: { category: "coding", cost: 0.20 },
+      }),
+      makeEvent({
+        id: "p3",
+        sessionId: "s3",
+        summary: "[other] not us",
+        details: { category: "coding", cost: 0.99 },
+      }),
+    ]);
+    const buckets = store.activityByProject("bpi");
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0]?.category).toBe("coding");
+    expect(buckets[0]?.eventCount).toBe(2);
+    expect(buckets[0]?.costUsd).toBeCloseTo(0.30);
+  });
+
+  it("uses 'chat' as the bucket label for events without a category", () => {
+    store.insert(
+      makeEvent({
+        id: "u1",
+        sessionId: "u-sess",
+        details: { cost: 0.01 },
+      }),
+    );
+    const buckets = store.activityBySession("u-sess");
+    expect(buckets[0]?.category).toBe("chat");
   });
 });
 

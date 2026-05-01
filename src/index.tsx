@@ -161,7 +161,9 @@ if (arg === "serve") {
       server.broadcaster.emitEnrich(eventId, patch);
     },
   };
-  const sink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const { withClassifier } = await import("./classify/index.js");
+  const persistSink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
+  const sink = withClassifier(persistSink);
   const adapters = startAllAdapters(sink, workspace);
   onShutdown(() => stopAllAdapters(adapters));
   onShutdown(() => server.stop());

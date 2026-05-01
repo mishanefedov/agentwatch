@@ -26,6 +26,7 @@ import { startServer, type ServerHandle, addEventToServer } from "../server/inde
 import { openUrl } from "../util/open-url.js";
 import { onShutdown } from "../util/shutdown.js";
 import { openStore, wrapSinkWithStore, type EventStore } from "../store/index.js";
+import { withClassifier } from "../classify/index.js";
 
 /**
  * agentwatch TUI — live log tail.
@@ -158,7 +159,8 @@ export function App() {
         }
       },
     };
-    const finalSink = store ? wrapSinkWithStore(sink, store) : sink;
+    const persistSink = store ? wrapSinkWithStore(sink, store) : sink;
+    const finalSink = withClassifier(persistSink);
     const adapters = startAllAdapters(finalSink, workspace);
     const unregisterShutdown = onShutdown(() => {
       flush();
