@@ -4,12 +4,13 @@ import { attributeTokens, attributeTurns } from "../../util/token-attribution.js
 import { buildCallGraph } from "../../util/call-graph.js";
 import { buildCompactionSeries } from "../../util/compaction.js";
 import { exportSession, sessionToMarkdown } from "../../util/export.js";
+import type { EventStore } from "../../store/sqlite.js";
 
-export function registerSessionRoutes(app: FastifyInstance, events: AgentEvent[]): void {
+export function registerSessionRoutes(app: FastifyInstance, events: AgentEvent[], store?: EventStore): void {
   // Full events for a session.
   app.get<{ Params: { id: string } }>("/api/sessions/:id", async (req, reply) => {
     const id = decodeURIComponent(req.params.id);
-    const sessionEvents = events.filter((e) => e.sessionId === id);
+    const sessionEvents = store ? store.listSessionEvents(id) : events.filter((e) => e.sessionId === id);
     if (sessionEvents.length === 0) {
       reply.code(404);
       return { error: "session not found (or events not yet loaded)" };
@@ -28,8 +29,8 @@ export function registerSessionRoutes(app: FastifyInstance, events: AgentEvent[]
       const id = decodeURIComponent(req.params.id);
       return {
         sessionId: id,
-        breakdown: attributeTokens(events, id),
-        turns: attributeTurns(events, id),
+        breakdown: attributeTokens(store ? store.listSessionEvents(id) : events, id),
+        turns: attributeTurns(store ? store.listSessionEvents(id) : events, id),
       };
     },
   );
@@ -40,7 +41,7 @@ export function registerSessionRoutes(app: FastifyInstance, events: AgentEvent[]
       const id = decodeURIComponent(req.params.id);
       return {
         sessionId: id,
-        series: buildCompactionSeries(events, id),
+        series: buildCompactionSeries(store ? store.listSessionEvents(id) : events, id),
       };
     },
   );
@@ -51,7 +52,7 @@ export function registerSessionRoutes(app: FastifyInstance, events: AgentEvent[]
       const id = decodeURIComponent(req.params.id);
       return {
         sessionId: id,
-        graph: buildCallGraph(events, id),
+        graph: buildCallGraph(store ? store.listSessionEvents(id) : events, id),
       };
     },
   );
@@ -61,7 +62,7 @@ export function registerSessionRoutes(app: FastifyInstance, events: AgentEvent[]
     "/api/sessions/:id/export",
     async (req, reply) => {
       const id = decodeURIComponent(req.params.id);
-      const sessionEvents = events.filter((e) => e.sessionId === id);
+      const sessionEvents = store ? store.listSessionEvents(id) : events.filter((e) => e.sessionId === id);
       if (sessionEvents.length === 0) {
         reply.code(404);
         return { error: "session not found" };
