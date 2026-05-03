@@ -10,6 +10,8 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-05-03
+
 ### Added — v0.1 foundation
 
 - **SQLite event store** (AUR-263) at `~/.agentwatch/events.db` — replaces
@@ -35,6 +37,37 @@ layout can change freely within a minor version.
   `~/.agentwatch/daemon.{pid,started_at}`; log at
   `~/.agentwatch/daemon.log` with a 10 MB single-slot rotation; PID
   re-acquire is stale-PID-aware (process-alive probe).
+- **Per-event activity classifier** (AUR-264) — every event lands with
+  `details.category` ∈ {coding, debugging, exploration, planning,
+  refactor, testing, docs, chat, config, review, devops, research}.
+  Heuristic ladder over file-extension / tool-name / shell-command /
+  prompt+response keyword signals; argmax wins. Schema v2 adds a
+  `category` column + index. New routes:
+  `GET /api/sessions/:id/activity`, `GET /api/projects/:name/activity`.
+- **Git-correlation yield views** (AUR-265) — pairs commits with the
+  sessions whose `[first_ts, last_ts + 30min]` window contains the
+  commit's author date, then surfaces $/commit, $/line-changed, total
+  insertions/deletions/files. Per-project view also returns a sorted
+  "spend without commit" list of sessions that burned dollars but
+  produced no commits in window. Worktree de-dup via `gitCommonDir()`.
+  Read-only: git verbs are allow-listed (`log`, `rev-parse`, `worktree`,
+  `show`, `diff`, `blame`, `status`, `config`, `branch`, `remote`).
+  New routes: `GET /api/sessions/:id/yield`,
+  `GET /api/projects/:name/yield`.
+- **Claude Code native hooks adapter** (AUR-266) — agentwatch can
+  register itself as a Claude hook and receive events ~1–2s faster
+  than the JSONL transcript, with no sub-event drops. Translates
+  every known Claude hook type (SessionStart, SessionEnd,
+  UserPromptSubmit, PreToolUse, PostToolUse, Stop, SubagentStop,
+  PreCompact, PostCompact, Notification) into the canonical
+  AgentEvent shape; unknown future types fall through to a generic
+  `tool_call` so new releases don't silently drop. CLI: `agentwatch
+  hooks {install | uninstall | status}`. Settings stanzas are tagged
+  with `[agentwatch-managed]` so uninstall only removes our entries
+  and preserves user-configured hooks. A 5-second `(sessionId,
+  toolUseId)` dedup window drops the duplicate JSONL copy when both
+  paths fire. `agentwatch doctor` now reports
+  `claude code hooks: installed | not-installed | partial`.
 
 ### Changed
 
@@ -42,6 +75,13 @@ layout can change freely within a minor version.
   every emit/enrich is now mirrored to SQLite. Failures are logged once
   and never propagated; the in-memory pipeline remains the source of
   truth for the live SSE stream.
+
+### Docs
+
+- **ROADMAP.md** — v0.1 → v1.0 direction, milestone gates, scope
+  commitments.
+- **glama.json + Glama badges** — MCP-registry profile so agentwatch
+  shows up in Glama's directory.
 
 ## [0.0.5] — 2026-05-01
 
