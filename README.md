@@ -17,6 +17,13 @@ semantic conventions. All local. No cloud. No telemetry. No sign-in.
 [![CI](https://github.com/mishanefedov/agentwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/mishanefedov/agentwatch/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node >=20](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](./package.json)
+[![MCP server](https://glama.ai/mcp/servers/mishanefedov/agentwatch/badges/score.svg)](https://glama.ai/mcp/servers/mishanefedov/agentwatch)
+
+</div>
+
+<div align="center">
+
+[![agentwatch on Glama](https://glama.ai/mcp/servers/mishanefedov/agentwatch/badges/card.svg)](https://glama.ai/mcp/servers/mishanefedov/agentwatch)
 
 </div>
 
