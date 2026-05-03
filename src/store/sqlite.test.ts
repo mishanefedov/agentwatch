@@ -386,6 +386,54 @@ describe("sqlite store — activity rollups (v2)", () => {
   });
 });
 
+describe("sqlite store — listRecentEvents", () => {
+  it("returns newest-first by default and respects limit", () => {
+    const t0 = Date.now();
+    for (let i = 0; i < 10; i++) {
+      store.insert(
+        makeEvent({
+          id: `r-${i}`,
+          sessionId: "s",
+          ts: new Date(t0 - i * 1000).toISOString(),
+        }),
+      );
+    }
+    const top3 = store.listRecentEvents({ limit: 3 });
+    expect(top3.map((e) => e.id)).toEqual(["r-0", "r-1", "r-2"]);
+  });
+
+  it("filters by sinceTs", () => {
+    const baseMs = Date.UTC(2026, 0, 1, 0, 0, 0);
+    for (let i = 0; i < 5; i++) {
+      store.insert(
+        makeEvent({
+          id: `t-${i}`,
+          sessionId: "s",
+          ts: new Date(baseMs + i * 1000).toISOString(),
+        }),
+      );
+    }
+    const since = new Date(baseMs + 2_000).toISOString();
+    const tail = store.listRecentEvents({ sinceTs: since, order: "asc" });
+    expect(tail.map((e) => e.id)).toEqual(["t-2", "t-3", "t-4"]);
+  });
+
+  it("returns asc order when requested", () => {
+    const t0 = Date.now();
+    store.insert(makeEvent({ id: "a-2", sessionId: "s", ts: new Date(t0).toISOString() }));
+    store.insert(makeEvent({ id: "a-1", sessionId: "s", ts: new Date(t0 - 1000).toISOString() }));
+    store.insert(makeEvent({ id: "a-3", sessionId: "s", ts: new Date(t0 + 1000).toISOString() }));
+    const asc = store.listRecentEvents({ order: "asc" });
+    expect(asc.map((e) => e.id)).toEqual(["a-1", "a-2", "a-3"]);
+  });
+
+  it("clamps oversize limit to 50000", () => {
+    expect(() =>
+      store.listRecentEvents({ limit: 999_999 }),
+    ).not.toThrow();
+  });
+});
+
 describe("sqlite store — bench (10k events)", () => {
   it(
     "ingests 10k events in under 2s",

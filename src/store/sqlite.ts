@@ -40,6 +40,15 @@ export interface ListSessionsOptions {
   since?: string;
 }
 
+export interface ListRecentEventsOptions {
+  /** ISO timestamp; only events with ts >= sinceTs are returned. */
+  sinceTs?: string;
+  /** Hard cap on rows returned. Defaults to 1000, max 50000. */
+  limit?: number;
+  /** Sort order. "desc" = newest-first (default); "asc" = oldest-first. */
+  order?: "asc" | "desc";
+}
+
 export interface PruneResult {
   deletedEvents: number;
   deletedSessions: number;
@@ -65,6 +74,10 @@ export interface EventStore {
   hasEvent(eventId: string): boolean;
   getEvent(eventId: string): AgentEvent | null;
   listSessionEvents(sessionId: string): AgentEvent[];
+  /** Recent events across every session, primarily for ambient passes
+   *  (budget rollups, anomaly histories) that need more than the live
+   *  in-memory ring but less than the full event table. */
+  listRecentEvents(opts?: ListRecentEventsOptions): AgentEvent[];
   listSessions(opts?: ListSessionsOptions): SessionSummary[];
   listProjects(): ProjectSummary[];
   searchFts(query: string, opts?: { limit?: number }): FtsHit[];
@@ -376,6 +389,24 @@ function buildStore(db: Database.Database): EventStore {
     },
     listSessionEvents(sessionId) {
       const rows = sessionEventsStmt.all(sessionId) as RawEventRow[];
+      return rows.map(rowToEvent);
+    },
+    listRecentEvents(opts = {}) {
+      const limit = clamp(opts.limit ?? 1000, 1, 50_000);
+      const order = opts.order === "asc" ? "ASC" : "DESC";
+      const where: string[] = [];
+      const params: unknown[] = [];
+      if (opts.sinceTs) {
+        where.push("ts >= ?");
+        params.push(opts.sinceTs);
+      }
+      const sql = `
+        SELECT * FROM events
+        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+        ORDER BY ts ${order}
+        LIMIT ?
+      `;
+      const rows = db.prepare(sql).all(...params, limit) as RawEventRow[];
       return rows.map(rowToEvent);
     },
     listSessions(opts = {}) {
