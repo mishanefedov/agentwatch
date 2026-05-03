@@ -113,6 +113,17 @@ export function App() {
     const stopTriggersWatch = watchTriggers();
     if (otelEnabled()) void initOtel();
     const launchedAt = Date.now();
+    // Seed the live tail from the store so the timeline isn't empty until
+    // adapters re-emit their JSONL backfill. Dedup at the wrapSinkWithStore
+    // boundary handles any id collisions when adapters do re-emit.
+    if (store) {
+      try {
+        const seed = store.listRecentEvents({ limit: 500, order: "desc" });
+        if (seed.length > 0) dispatch({ type: "events-batch", events: seed });
+      } catch {
+        // store may be unavailable; live tail will fill from adapters
+      }
+    }
     // Coalesce incoming events into a single dispatch per frame.
     let pending: AgentEvent[] = [];
     let flushScheduled = false;
@@ -193,16 +204,38 @@ export function App() {
     ? agentFiltered.filter((e) => matchesQuery(e, state.searchQuery))
     : agentFiltered;
 
-  // Expensive derived passes — recompute only when the buffer changes.
+  // Live-tail ring drives the timeline view. The expensive ambient passes
+  // (budget rollups, anomaly histories, sub-agent child counts) read from
+  // the store so they see the full retention window, not just the last
+  // ~500 events held in React state. eventsRef is the recompute trigger —
+  // any new event grows the ring and busts these memos.
   const eventsRef = state.events;
 
-  const budgetStatus = useMemo(() => computeBudgetStatus(eventsRef), [eventsRef]);
+  const budgetStatus = useMemo(() => {
+    if (!store) return computeBudgetStatus(eventsRef);
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const since = todayStart.toISOString();
+    // Per-session caps are checked against per-session totals — capped at 30 days
+    // so a long-running session that started yesterday is still seen. Day rollup
+    // filters by ts inside computeBudgetStatus.
+    const monthAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const events = store.listRecentEvents({
+      sinceTs: monthAgo < since ? monthAgo : since,
+      limit: 50_000,
+      order: "asc",
+    });
+    return computeBudgetStatus(events);
+  }, [eventsRef, store]);
 
   const anomalies = useMemo(() => {
+    const source = store
+      ? store.listRecentEvents({ limit: 5_000, order: "desc" })
+      : eventsRef;
     const out = new Map<string, AnomalyFlag[]>();
-    const sliceEnd = Math.min(40, eventsRef.length);
+    const sliceEnd = Math.min(40, source.length);
     const historyByAgent = new Map<string, AgentEvent[]>();
-    for (const e of eventsRef) {
+    for (const e of source) {
       let arr = historyByAgent.get(e.agent);
       if (!arr) {
         arr = [];
@@ -211,7 +244,7 @@ export function App() {
       arr.push(e);
     }
     for (let i = 0; i < sliceEnd; i++) {
-      const ev = eventsRef[i]!;
+      const ev = source[i]!;
       const agentHistory = historyByAgent.get(ev.agent) ?? [];
       const pos = agentHistory.indexOf(ev);
       const history = pos >= 0 ? agentHistory.slice(pos + 1) : agentHistory;
@@ -219,9 +252,9 @@ export function App() {
       const flags = scoreEvent(ev, history);
       if (flags.length > 0) out.set(ev.id, flags);
     }
-    const stuckLoop = detectStuckLoop(eventsRef.slice(0, 20).reverse());
+    const stuckLoop = detectStuckLoop(source.slice(0, 20).reverse());
     if (stuckLoop) {
-      const first = eventsRef[0];
+      const first = source[0];
       if (first) {
         const prev = out.get(first.id) ?? [];
         const label =
@@ -240,7 +273,7 @@ export function App() {
       }
     }
     return out;
-  }, [eventsRef]);
+  }, [eventsRef, store]);
 
   // Budget-breach notifications (once per distinct breach).
   const budgetBreachKey = [
@@ -283,15 +316,18 @@ export function App() {
   }, [anomalyKey]);
 
   const childCountByAgentId = useMemo(() => {
+    const source = store
+      ? store.listRecentEvents({ limit: 10_000, order: "desc" })
+      : eventsRef;
     const m = new Map<string, number>();
-    for (const e of eventsRef) {
+    for (const e of source) {
       if (e.sessionId?.startsWith("agent-")) {
         const aid = e.sessionId.slice("agent-".length);
         m.set(aid, (m.get(aid) ?? 0) + 1);
       }
     }
     return m;
-  }, [eventsRef]);
+  }, [eventsRef, store]);
 
   const cols = stdout.columns || 120;
   const rows = stdout.rows || 30;
