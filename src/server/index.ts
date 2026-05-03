@@ -157,8 +157,8 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
   });
 
   registerEventRoutes(app, events);
-  registerProjectRoutes(app, events);
-  registerSessionRoutes(app, events);
+  registerProjectRoutes(app, events, opts.store);
+  registerSessionRoutes(app, events, opts.store);
   registerAgentRoutes(app, events, byAgent);
   registerPermissionRoutes(app);
   registerCronRoutes(app, events);
