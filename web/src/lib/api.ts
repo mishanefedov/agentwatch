@@ -92,6 +92,64 @@ export const api = {
       }>;
     }>(`/api/projects/${encodeURIComponent(name)}/activity`),
 
+  sessionYield: (id: string) =>
+    getJson<
+      | {
+          sessionId: string;
+          ok: true;
+          project: string;
+          repoPath: string;
+          yield: {
+            sessionId: string;
+            costUsd: number;
+            commits: Array<{
+              hash: string;
+              authorDate: string;
+              authorName: string;
+              filesChanged: number;
+              insertions: number;
+              deletions: number;
+              subject: string;
+            }>;
+            totalInsertions: number;
+            totalDeletions: number;
+            totalFilesChanged: number;
+            costPerCommit: number | null;
+            costPerLineChanged: number | null;
+          };
+        }
+      | { sessionId: string; ok: false; reason: string }
+    >(`/api/sessions/${encodeURIComponent(id)}/yield`),
+
+  projectYield: (name: string) =>
+    getJson<
+      | {
+          project: string;
+          ok: true;
+          repoPath: string;
+          yield: {
+            project: string;
+            weekly: Array<{
+              weekStart: string;
+              costUsd: number;
+              commits: number;
+              costPerCommit: number | null;
+            }>;
+            spendWithoutCommit: Array<{
+              sessionId: string;
+              costUsd: number;
+              commits: never[];
+              totalInsertions: number;
+              totalDeletions: number;
+              totalFilesChanged: number;
+              costPerCommit: number | null;
+              costPerLineChanged: number | null;
+            }>;
+          };
+        }
+      | { project: string; ok: false; reason: string }
+    >(`/api/projects/${encodeURIComponent(name)}/yield`),
+
   search: (
     query: string,
     mode: "live" | "cross" | "semantic" = "live",

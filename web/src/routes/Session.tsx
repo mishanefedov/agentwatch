@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { agentColor, formatTime, riskClass, typeIcon } from "../lib/format";
-import { ArrowLeft, Download, BarChart3, Activity, GitBranch, FileEdit, Play, PieChart } from "lucide-react";
+import { ArrowLeft, Download, BarChart3, Activity, GitBranch, FileEdit, Play, PieChart, DollarSign } from "lucide-react";
 import clsx from "clsx";
 import type { AgentEvent } from "../lib/types";
 
@@ -49,6 +49,9 @@ export function SessionPage() {
           </Link>
           <Link to={`/sessions/${encodeURIComponent(id)}/activity`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
             <PieChart className="w-3.5 h-3.5" /> activity
+          </Link>
+          <Link to={`/sessions/${encodeURIComponent(id)}/yield`} className="text-xs text-fg-dim hover:text-accent flex items-center gap-1">
+            <DollarSign className="w-3.5 h-3.5" /> yield
           </Link>
           <a
             href={`/api/sessions/${encodeURIComponent(id)}/export?format=md&inline=1`}
