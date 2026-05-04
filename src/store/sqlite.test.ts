@@ -371,6 +371,21 @@ describe("sqlite store — activity rollups (v2)", () => {
     expect(buckets[0]?.category).toBe("coding");
     expect(buckets[0]?.eventCount).toBe(2);
     expect(buckets[0]?.costUsd).toBeCloseTo(0.30);
+    expect(buckets[0]?.sessionsTouched).toBe(2);
+  });
+
+  it("activityByProject sessionsTouched counts distinct sessions per category", () => {
+    store.insertMany([
+      makeEvent({ id: "x1", sessionId: "s1", summary: "[acme] a", details: { category: "coding" } }),
+      makeEvent({ id: "x2", sessionId: "s1", summary: "[acme] b", details: { category: "coding" } }),
+      makeEvent({ id: "x3", sessionId: "s2", summary: "[acme] c", details: { category: "coding" } }),
+      makeEvent({ id: "x4", sessionId: "s3", summary: "[acme] d", details: { category: "testing" } }),
+    ]);
+    const buckets = store.activityByProject("acme");
+    const coding = buckets.find((b) => b.category === "coding");
+    const testing = buckets.find((b) => b.category === "testing");
+    expect(coding?.sessionsTouched).toBe(2);
+    expect(testing?.sessionsTouched).toBe(1);
   });
 
   it("uses 'chat' as the bucket label for events without a category", () => {
