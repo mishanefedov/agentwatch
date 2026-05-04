@@ -50,7 +50,9 @@ export async function runDaemon(): Promise<void> {
   let stoppingHooks: Array<() => Promise<void> | void> = [];
 
   try {
-    const { openStore, wrapSinkWithStore } = await import("../store/index.js");
+    const { openStore, wrapSinkWithStore, wrapSinkWithLinks } = await import(
+      "../store/index.js"
+    );
     const { startAllAdapters, stopAllAdapters } = await import(
       "../adapters/registry.js"
     );
@@ -70,7 +72,9 @@ export async function runDaemon(): Promise<void> {
         // wrapper; nothing additional to do here.
       },
     };
-    const sink = wrapSinkWithStore(inner, store);
+    // AUR-276: linker layered after the store wrapper so it can read the
+    // already-persisted session row when upserting workspace + branch.
+    const sink = wrapSinkWithLinks(wrapSinkWithStore(inner, store), store);
     const adapters = startAllAdapters(sink, workspace);
     stoppingHooks.push(() => stopAllAdapters(adapters));
     stoppingHooks.push(() => store?.close());

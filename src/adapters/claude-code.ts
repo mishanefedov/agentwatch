@@ -336,6 +336,10 @@ export function translateClaudeLine(
         evType === "shell_exec" && toolUse.cmd
           ? detectAgentCall(toolUse.cmd)
           : null;
+      // AUR-276: file_write events carry cwd so the session-correlation
+      // linker can resolve the workspace root + branch without a
+      // round-trip back to the adapter.
+      const cwd = typeof o.cwd === "string" ? o.cwd : undefined;
       return {
         id: nextId(),
         ts,
@@ -357,6 +361,7 @@ export function translateClaudeLine(
           cost,
           model,
           ...(agentCall ? { agentCall } : {}),
+          ...(evType === "file_write" && cwd ? { cwd } : {}),
         },
       };
     }

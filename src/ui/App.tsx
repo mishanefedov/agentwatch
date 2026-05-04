@@ -25,7 +25,12 @@ import { initialState, matchesQuery, reducer } from "./state.js";
 import { startServer, type ServerHandle, addEventToServer } from "../server/index.js";
 import { openUrl } from "../util/open-url.js";
 import { onShutdown } from "../util/shutdown.js";
-import { openStore, wrapSinkWithStore, type EventStore } from "../store/index.js";
+import {
+  openStore,
+  wrapSinkWithStore,
+  wrapSinkWithLinks,
+  type EventStore,
+} from "../store/index.js";
 import { withClaudeHookDedup } from "../adapters/hooks-dedup.js";
 import { withClassifier } from "../classify/index.js";
 
@@ -50,6 +55,11 @@ export function App() {
   const [server, setServer] = useState<ServerHandle | null>(null);
   const [store, setStore] = useState<EventStore | null>(null);
   const noWeb = process.argv.includes("--no-web");
+  // AUR-276: dev-only candidate-pair counter, gated on the env var.
+  // `undefined` means "don't render the badge"; a number renders it.
+  const [linkCandidateCount, setLinkCandidateCount] = useState<number | undefined>(
+    undefined,
+  );
 
   // Persistent SQLite store — opened once, drains on shutdown. Failure to
   // open (e.g. read-only home dir) leaves store=null; the rest of the TUI
@@ -175,7 +185,10 @@ export function App() {
       },
     };
     const persistSink = store ? wrapSinkWithStore(sink, store) : sink;
-    const classifiedSink = withClassifier(persistSink);
+    // AUR-276: layered after the store wrapper so it can read the
+    // already-persisted session row when upserting workspace + branch.
+    const linkedSink = store ? wrapSinkWithLinks(persistSink, store) : persistSink;
+    const classifiedSink = withClassifier(linkedSink);
     const finalSink = withClaudeHookDedup(classifiedSink);
     if (server) {
       // Hooks route forwards Claude hook curls into the same pipeline
@@ -295,6 +308,25 @@ export function App() {
       );
     }
   }, [budgetBreachKey]);
+
+  // AUR-276: poll the candidate-pair count when the dev env var is set.
+  // Cheap (single COUNT(*) on an indexed table); 5 s cadence is enough
+  // for an eyeball-it-now-and-then debug surface. No-op when the var is
+  // unset so non-dev users see no overhead and no badge.
+  useEffect(() => {
+    if (!store) return;
+    if (process.env.AGENTWATCH_DEBUG_LINKS !== "1") return;
+    const refresh = (): void => {
+      try {
+        setLinkCandidateCount(store.countAllLinkCandidates());
+      } catch {
+        // Store may be transiently locked; ignore — we'll catch the next tick.
+      }
+    };
+    refresh();
+    const handle = setInterval(refresh, 5_000);
+    return () => clearInterval(handle);
+  }, [store]);
 
   const sessionSummaries = useMemo(() => summarizeBySession(anomalies), [anomalies]);
   const anomalyKey = sessionSummaries.map((s) => `${s.sessionId}:${s.headline}`).join("|");
@@ -418,6 +450,7 @@ export function App() {
         anomalies={bannerSuppressed ? undefined : anomalies}
         sessionAnomalies={bannerSuppressed ? [] : sessionSummaries}
         webUrl={server?.url}
+        linkCandidateCount={linkCandidateCount}
       />
       <Breadcrumb
         projectFilter={state.projectFilter}
