@@ -26,6 +26,8 @@ Usage:
                               (subcommands: start | stop | status | logs)
   agentwatch hooks ...      install / uninstall / status the Claude Code hooks adapter
   agentwatch prune          drop events older than --older-than-days (default 90)
+  agentwatch link-candidates   dump AUR-276 session-correlation candidate pairs as JSON
+                               (--session <id> to scope; --limit <n> to cap)
   agentwatch --help         show this help
 
 Flags:
@@ -42,9 +44,10 @@ Hotkeys inside the TUI:
   w       open web UI in browser
 
 Environment:
-  WORKSPACE_ROOT   override the detected workspace root
-  AGENTWATCH_PORT  override the web server port
-  AGENTWATCH_HOST  override the web server bind address
+  WORKSPACE_ROOT          override the detected workspace root
+  AGENTWATCH_PORT         override the web server port
+  AGENTWATCH_HOST         override the web server bind address
+  AGENTWATCH_DEBUG_LINKS  show AUR-276 candidate-pair counts in the agent panel
 `);
   process.exit(0);
 }
@@ -116,6 +119,34 @@ if (arg === "hooks") {
   process.exit(2);
 }
 
+if (arg === "link-candidates") {
+  // AUR-276: dump session-correlation candidate pairs as JSON so Michael
+  // can manually classify them (true-positive / false-positive / unclear)
+  // toward the AUR-277 validation gate. No formatting, no colours — this
+  // is plumbing, not UX.
+  const { openStore } = await import("./store/index.js");
+  const sessionId = parseFlag("--session");
+  const limitFlag = parseFlag("--limit");
+  const limit = limitFlag ? Number(limitFlag) : undefined;
+  if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+    process.stderr.write(
+      `[agentwatch] link-candidates: --limit must be a positive number, got ${limitFlag}\n`,
+    );
+    process.exit(2);
+  }
+  const store = openStore();
+  try {
+    const rows = store.listSessionLinkCandidates({
+      ...(sessionId ? { sessionId } : {}),
+      ...(limit ? { limit } : {}),
+    });
+    process.stdout.write(JSON.stringify(rows, null, 2) + "\n");
+  } finally {
+    store.close();
+  }
+  process.exit(0);
+}
+
 if (arg === "prune") {
   const { openStore } = await import("./store/index.js");
   const days = Number(parseFlag("--older-than-days") ?? "90");
@@ -182,7 +213,9 @@ if (arg === "serve") {
   );
   const { detectWorkspaceRoot } = await import("./util/workspace.js");
   const { clampTs } = await import("./schema.js");
-  const { openStore, wrapSinkWithStore } = await import("./store/index.js");
+  const { openStore, wrapSinkWithStore, wrapSinkWithLinks } = await import(
+    "./store/index.js"
+  );
   const workspace = detectWorkspaceRoot();
   const host = parseFlag("--host") ?? process.env.AGENTWATCH_HOST ?? "127.0.0.1";
   const port = Number(parseFlag("--port") ?? process.env.AGENTWATCH_PORT ?? 3456);
@@ -220,7 +253,10 @@ if (arg === "serve") {
   const { withClassifier } = await import("./classify/index.js");
   const { withClaudeHookDedup } = await import("./adapters/hooks-dedup.js");
   const persistSink = store ? wrapSinkWithStore(innerSink, store) : innerSink;
-  const classifiedSink = withClassifier(persistSink);
+  // AUR-276: layered after the store wrapper so the linker sees the
+  // already-persisted session row when it upserts workspace + branch.
+  const linkedSink = store ? wrapSinkWithLinks(persistSink, store) : persistSink;
+  const classifiedSink = withClassifier(linkedSink);
   const sink = withClaudeHookDedup(classifiedSink);
   server.setHookSink(sink);
   const adapters = startAllAdapters(sink, workspace);

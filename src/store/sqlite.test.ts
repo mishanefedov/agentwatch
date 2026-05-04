@@ -449,6 +449,172 @@ describe("sqlite store — listRecentEvents", () => {
   });
 });
 
+describe("sqlite store — AUR-276 schema V3 (workspace + link candidates)", () => {
+  it("schema_version is at least 3 on a fresh DB", () => {
+    expect(store.stats().schemaVersion).toBeGreaterThanOrEqual(3);
+  });
+
+  it("re-opening an existing DB is idempotent at V3", () => {
+    const first = store.stats().schemaVersion;
+    store.close();
+    store = openStore({ dbPath: join(dir, "events.db") });
+    expect(store.stats().schemaVersion).toBe(first);
+  });
+
+  it("upsertSessionWorkspace populates a session row first-write-wins", () => {
+    const e = makeEvent({ sessionId: "s1" });
+    store.insert(e);
+    store.upsertSessionWorkspace("s1", {
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    expect(store.getSessionWorkspace("s1")).toEqual({
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    // Second call with different values must NOT overwrite.
+    store.upsertSessionWorkspace("s1", {
+      workspaceRoot: "/elsewhere",
+      gitBranch: "feature",
+    });
+    expect(store.getSessionWorkspace("s1")).toEqual({
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+  });
+
+  it("upsertSessionWorkspace is a no-op when both values are null", () => {
+    const e = makeEvent({ sessionId: "s2" });
+    store.insert(e);
+    store.upsertSessionWorkspace("s2", { workspaceRoot: null, gitBranch: null });
+    expect(store.getSessionWorkspace("s2")).toEqual({
+      workspaceRoot: null,
+      gitBranch: null,
+    });
+  });
+
+  it("getSessionWorkspace returns null/null for an unknown session", () => {
+    expect(store.getSessionWorkspace("does-not-exist")).toEqual({
+      workspaceRoot: null,
+      gitBranch: null,
+    });
+  });
+
+  it("recordSessionLinkCandidate creates a row, then bumps on repeat", () => {
+    store.recordSessionLinkCandidate({
+      aSession: "sess-claude",
+      bSession: "sess-openclaw",
+      aAgent: "claude-code",
+      bAgent: "openclaw",
+      samplePath: "/repo/foo.ts",
+      ts: "2026-05-04T10:00:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    const after1 = store.listSessionLinkCandidates();
+    expect(after1).toHaveLength(1);
+    expect(after1[0]?.linkCount).toBe(1);
+    store.recordSessionLinkCandidate({
+      aSession: "sess-claude",
+      bSession: "sess-openclaw",
+      aAgent: "claude-code",
+      bAgent: "openclaw",
+      samplePath: "/repo/bar.ts", // sample_path on the existing row stays
+      ts: "2026-05-04T10:05:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    const after2 = store.listSessionLinkCandidates();
+    expect(after2).toHaveLength(1);
+    expect(after2[0]?.linkCount).toBe(2);
+    expect(after2[0]?.lastLinkTs).toBe("2026-05-04T10:05:00.000Z");
+    expect(after2[0]?.firstLinkTs).toBe("2026-05-04T10:00:00.000Z");
+    expect(after2[0]?.samplePath).toBe("/repo/foo.ts"); // unchanged
+  });
+
+  it("canonicalizes pair ids — recording (B,A) hits the same row as (A,B)", () => {
+    store.recordSessionLinkCandidate({
+      aSession: "z-session", // > a-session lexicographically
+      bSession: "a-session",
+      aAgent: "openclaw",
+      bAgent: "claude-code",
+      samplePath: "/repo/foo.ts",
+      ts: "2026-05-04T10:00:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    store.recordSessionLinkCandidate({
+      aSession: "a-session",
+      bSession: "z-session",
+      aAgent: "claude-code",
+      bAgent: "openclaw",
+      samplePath: "/repo/foo.ts",
+      ts: "2026-05-04T10:05:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    const rows = store.listSessionLinkCandidates();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.aSession).toBe("a-session");
+    expect(rows[0]?.bSession).toBe("z-session");
+    expect(rows[0]?.linkCount).toBe(2);
+  });
+
+  it("listSessionLinkCandidates filters by sessionId either side", () => {
+    store.recordSessionLinkCandidate({
+      aSession: "sess-A",
+      bSession: "sess-B",
+      aAgent: "claude-code",
+      bAgent: "openclaw",
+      samplePath: "/repo/foo.ts",
+      ts: "2026-05-04T10:00:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    store.recordSessionLinkCandidate({
+      aSession: "sess-A",
+      bSession: "sess-C",
+      aAgent: "claude-code",
+      bAgent: "gemini",
+      samplePath: "/repo/bar.ts",
+      ts: "2026-05-04T10:01:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    expect(store.listSessionLinkCandidates({ sessionId: "sess-A" })).toHaveLength(2);
+    expect(store.listSessionLinkCandidates({ sessionId: "sess-B" })).toHaveLength(1);
+    expect(store.listSessionLinkCandidates({ sessionId: "sess-D" })).toHaveLength(0);
+    expect(store.listSessionLinkCandidates()).toHaveLength(2);
+  });
+
+  it("countSessionLinkCandidates + countAllLinkCandidates", () => {
+    store.recordSessionLinkCandidate({
+      aSession: "sess-A",
+      bSession: "sess-B",
+      aAgent: "claude-code",
+      bAgent: "openclaw",
+      samplePath: "/repo/foo.ts",
+      ts: "2026-05-04T10:00:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    store.recordSessionLinkCandidate({
+      aSession: "sess-A",
+      bSession: "sess-C",
+      aAgent: "claude-code",
+      bAgent: "gemini",
+      samplePath: "/repo/bar.ts",
+      ts: "2026-05-04T10:01:00.000Z",
+      workspaceRoot: "/repo",
+      gitBranch: "main",
+    });
+    expect(store.countSessionLinkCandidates("sess-A")).toBe(2);
+    expect(store.countSessionLinkCandidates("sess-C")).toBe(1);
+    expect(store.countSessionLinkCandidates("nope")).toBe(0);
+    expect(store.countAllLinkCandidates()).toBe(2);
+  });
+});
+
 describe("sqlite store — bench (10k events)", () => {
   it(
     "ingests 10k events in under 2s",
