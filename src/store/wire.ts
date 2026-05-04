@@ -77,6 +77,16 @@ export function wrapSinkWithLinks(
   let warned = false;
   return {
     emit: (event) => {
+      // CRITICAL: forward to inner FIRST. inner is wrapSinkWithStore in
+      // production, which runs store.insert and fires the AFTER-INSERT
+      // trigger that upserts the sessions row. processWrite then runs
+      // upsertSessionWorkspace against a row that exists. If we ran
+      // processWrite first, the very first file_write of every session
+      // would silently fail to populate workspace_root + git_branch
+      // (UPDATE on a missing row is a no-op) and short-lived sessions
+      // with only one write would be permanently null — exactly the
+      // telemetry data AUR-276 needs to collect.
+      inner.emit(event);
       try {
         if (isLinkableWrite(event)) processWrite(event, store, index, resolve);
       } catch (err) {
@@ -87,7 +97,6 @@ export function wrapSinkWithLinks(
           );
         }
       }
-      inner.emit(event);
     },
     enrich: (eventId, patch) => inner.enrich(eventId, patch),
   };
