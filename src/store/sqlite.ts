@@ -70,6 +70,40 @@ export interface ActivityBucket {
   sessionsTouched?: number;
 }
 
+export interface SessionWorkspace {
+  /** Canonical workspace root (gitCommonDir-resolved). Null when the
+   *  originating adapter had no cwd to derive it from. */
+  workspaceRoot: string | null;
+  /** Current branch at the time the session's first file_write fired.
+   *  Null when not in a git repo, in detached-HEAD state, or git is
+   *  unavailable. */
+  gitBranch: string | null;
+}
+
+/** AUR-276: an unverified pair of sessions that touched the same path
+ *  inside the 30-min sliding window on the same workspace + branch.
+ *  Stored to disk so we can measure the false-positive rate against
+ *  real multi-agent telemetry before promoting any of this to a UI. */
+export interface SessionLinkCandidate {
+  aSession: string;
+  bSession: string;
+  aAgent: AgentName;
+  bAgent: AgentName;
+  firstLinkTs: string;
+  lastLinkTs: string;
+  linkCount: number;
+  samplePath: string;
+  workspaceRoot: string | null;
+  gitBranch: string | null;
+}
+
+export interface ListLinkCandidatesOptions {
+  /** Restrict to candidates that involve this session (either side). */
+  sessionId?: string;
+  /** Hard cap on rows returned. Defaults to 200, max 5000. */
+  limit?: number;
+}
+
 export interface EventStore {
   insert(event: AgentEvent): void;
   insertMany(events: AgentEvent[]): void;
@@ -88,12 +122,47 @@ export interface EventStore {
   activityBySession(sessionId: string): ActivityBucket[];
   /** Per-category event count + cost across every session in a project. */
   activityByProject(projectName: string): ActivityBucket[];
+  /** AUR-276: first-write-wins write of (workspace_root, git_branch)
+   *  for a session row. Re-calls with the same session id are no-ops
+   *  whenever the existing column is already populated. */
+  upsertSessionWorkspace(
+    sessionId: string,
+    workspace: SessionWorkspace,
+  ): void;
+  /** AUR-276: read the cached workspace + branch for a session. Returns
+   *  `{workspaceRoot:null, gitBranch:null}` when the session row hasn't
+   *  been resolved yet (or doesn't exist). */
+  getSessionWorkspace(sessionId: string): SessionWorkspace;
+  /** AUR-276: upsert a candidate-pair row. The first call creates a row
+   *  with `link_count=1`; subsequent calls for the same pair bump
+   *  `link_count` and refresh `last_link_ts`. Pair ids are canonicalized
+   *  (`a < b` lexicographically) so each pair stores once. */
+  recordSessionLinkCandidate(input: {
+    aSession: string;
+    bSession: string;
+    aAgent: AgentName;
+    bAgent: AgentName;
+    samplePath: string;
+    ts: string;
+    workspaceRoot: string | null;
+    gitBranch: string | null;
+  }): void;
+  /** AUR-276: list candidate pairs (newest first by last_link_ts). */
+  listSessionLinkCandidates(
+    opts?: ListLinkCandidatesOptions,
+  ): SessionLinkCandidate[];
+  /** AUR-276: total candidate-pair rows touching a given session. Used
+   *  by the dev-only TUI badge gated on AGENTWATCH_DEBUG_LINKS. */
+  countSessionLinkCandidates(sessionId: string): number;
+  /** AUR-276: total candidate-pair rows in the table. Used by the dev-only
+   *  TUI badge to surface global telemetry growth at a glance. */
+  countAllLinkCandidates(): number;
   prune(opts: { olderThanDays: number }): PruneResult;
   stats(): StoreStats;
   close(): void;
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export const DEFAULT_DB_PATH = join(homedir(), ".agentwatch", "events.db");
 
@@ -120,9 +189,42 @@ function applyMigrations(db: Database.Database): void {
   const current = row?.version ?? 0;
   if (current < 1) applyV1(db);
   if (current < 2) applyV2(db);
+  if (current < 3) applyV3(db);
   db.prepare(
     "INSERT OR REPLACE INTO schema_version (version) VALUES (?)",
   ).run(SCHEMA_VERSION);
+}
+
+function applyV3(db: Database.Database): void {
+  // AUR-276: workspace + branch per session, plus candidate-pair table for
+  // session-correlation telemetry. ALTER TABLE adds nullable columns; the
+  // candidate table is brand new. All steps idempotent (duplicate-column
+  // and CREATE IF NOT EXISTS) so a re-applied migration is a no-op.
+  for (const col of ["workspace_root", "git_branch"]) {
+    try {
+      db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
+    } catch (err) {
+      if (!String(err).includes("duplicate column name")) throw err;
+    }
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_link_candidates (
+      a_session TEXT NOT NULL,
+      b_session TEXT NOT NULL,
+      a_agent TEXT NOT NULL,
+      b_agent TEXT NOT NULL,
+      first_link_ts TEXT NOT NULL,
+      last_link_ts TEXT NOT NULL,
+      link_count INTEGER NOT NULL DEFAULT 1,
+      sample_path TEXT NOT NULL,
+      workspace_root TEXT,
+      git_branch TEXT,
+      PRIMARY KEY (a_session, b_session)
+    );
+    CREATE INDEX IF NOT EXISTS idx_link_candidates_a ON session_link_candidates(a_session);
+    CREATE INDEX IF NOT EXISTS idx_link_candidates_b ON session_link_candidates(b_session);
+    CREATE INDEX IF NOT EXISTS idx_link_candidates_last_ts ON session_link_candidates(last_link_ts);
+  `);
 }
 
 function applyV2(db: Database.Database): void {
@@ -379,10 +481,163 @@ function buildStore(db: Database.Database): EventStore {
     }
   }
 
+  // AUR-276: workspace + branch per session, plus candidate-pair upsert
+  // and reads. Prepared once for the lifetime of the store.
+  const upsertSessionWorkspaceStmt = db.prepare(`
+    UPDATE sessions
+    SET workspace_root = COALESCE(workspace_root, @workspace_root),
+        git_branch     = COALESCE(git_branch,     @git_branch),
+        updated_at     = strftime('%s','now')
+    WHERE session_id = @session_id
+  `);
+
+  const getSessionWorkspaceStmt = db.prepare(`
+    SELECT workspace_root, git_branch
+    FROM sessions
+    WHERE session_id = ?
+  `);
+
+  // INSERT OR IGNORE the canonical pair, then UPDATE bumps link_count +
+  // last_link_ts. INSERT-then-UPDATE is two statements but the alternative
+  // (`ON CONFLICT(...) DO UPDATE SET link_count = link_count + 1`) makes
+  // the "first row wins for sample_path / workspace_root / git_branch"
+  // semantics harder to reason about. Two statements is clearer.
+  const insertLinkCandidateStmt = db.prepare(`
+    INSERT OR IGNORE INTO session_link_candidates (
+      a_session, b_session, a_agent, b_agent,
+      first_link_ts, last_link_ts, link_count,
+      sample_path, workspace_root, git_branch
+    ) VALUES (
+      @a_session, @b_session, @a_agent, @b_agent,
+      @ts, @ts, 1,
+      @sample_path, @workspace_root, @git_branch
+    )
+  `);
+  const bumpLinkCandidateStmt = db.prepare(`
+    UPDATE session_link_candidates
+    SET link_count   = link_count + 1,
+        last_link_ts = CASE WHEN @ts > last_link_ts THEN @ts ELSE last_link_ts END
+    WHERE a_session = @a_session AND b_session = @b_session
+  `);
+
+  const listLinkCandidatesAllStmt = db.prepare(`
+    SELECT a_session, b_session, a_agent, b_agent,
+           first_link_ts, last_link_ts, link_count,
+           sample_path, workspace_root, git_branch
+    FROM session_link_candidates
+    ORDER BY last_link_ts DESC
+    LIMIT ?
+  `);
+  const listLinkCandidatesForSessionStmt = db.prepare(`
+    SELECT a_session, b_session, a_agent, b_agent,
+           first_link_ts, last_link_ts, link_count,
+           sample_path, workspace_root, git_branch
+    FROM session_link_candidates
+    WHERE a_session = ? OR b_session = ?
+    ORDER BY last_link_ts DESC
+    LIMIT ?
+  `);
+  const countLinkCandidatesForSessionStmt = db.prepare(`
+    SELECT COUNT(*) AS c
+    FROM session_link_candidates
+    WHERE a_session = ? OR b_session = ?
+  `);
+  const countAllLinkCandidatesStmt = db.prepare(`
+    SELECT COUNT(*) AS c FROM session_link_candidates
+  `);
+
   return {
     insert: doInsert,
     insertMany: (events) => insertMany(events),
     enrich: doEnrich,
+    upsertSessionWorkspace(sessionId, workspace) {
+      // No-op if both fields are null — nothing to learn from this call.
+      if (workspace.workspaceRoot == null && workspace.gitBranch == null) return;
+      upsertSessionWorkspaceStmt.run({
+        session_id: sessionId,
+        workspace_root: workspace.workspaceRoot,
+        git_branch: workspace.gitBranch,
+      });
+    },
+    getSessionWorkspace(sessionId) {
+      const row = getSessionWorkspaceStmt.get(sessionId) as
+        | { workspace_root: string | null; git_branch: string | null }
+        | undefined;
+      return {
+        workspaceRoot: row?.workspace_root ?? null,
+        gitBranch: row?.git_branch ?? null,
+      };
+    },
+    recordSessionLinkCandidate(input) {
+      // Canonicalize so each undirected pair stores once.
+      const [aSession, bSession, aAgent, bAgent] =
+        input.aSession < input.bSession
+          ? [input.aSession, input.bSession, input.aAgent, input.bAgent]
+          : [input.bSession, input.aSession, input.bAgent, input.aAgent];
+      const params = {
+        a_session: aSession,
+        b_session: bSession,
+        a_agent: aAgent,
+        b_agent: bAgent,
+        ts: input.ts,
+        sample_path: input.samplePath,
+        workspace_root: input.workspaceRoot,
+        git_branch: input.gitBranch,
+      };
+      const inserted = insertLinkCandidateStmt.run(params);
+      if (inserted.changes === 0) {
+        bumpLinkCandidateStmt.run({
+          a_session: aSession,
+          b_session: bSession,
+          ts: input.ts,
+        });
+      }
+    },
+    listSessionLinkCandidates(opts = {}) {
+      const limit = clamp(opts.limit ?? 200, 1, 5000);
+      const rows = (
+        opts.sessionId
+          ? listLinkCandidatesForSessionStmt.all(
+              opts.sessionId,
+              opts.sessionId,
+              limit,
+            )
+          : listLinkCandidatesAllStmt.all(limit)
+      ) as Array<{
+        a_session: string;
+        b_session: string;
+        a_agent: AgentName;
+        b_agent: AgentName;
+        first_link_ts: string;
+        last_link_ts: string;
+        link_count: number;
+        sample_path: string;
+        workspace_root: string | null;
+        git_branch: string | null;
+      }>;
+      return rows.map((r) => ({
+        aSession: r.a_session,
+        bSession: r.b_session,
+        aAgent: r.a_agent,
+        bAgent: r.b_agent,
+        firstLinkTs: r.first_link_ts,
+        lastLinkTs: r.last_link_ts,
+        linkCount: r.link_count,
+        samplePath: r.sample_path,
+        workspaceRoot: r.workspace_root,
+        gitBranch: r.git_branch,
+      }));
+    },
+    countSessionLinkCandidates(sessionId) {
+      const row = countLinkCandidatesForSessionStmt.get(
+        sessionId,
+        sessionId,
+      ) as { c: number };
+      return row.c;
+    },
+    countAllLinkCandidates() {
+      return (countAllLinkCandidatesStmt.get() as { c: number }).c;
+    },
     hasEvent(eventId) {
       return Boolean(hasStmt.get(eventId));
     },

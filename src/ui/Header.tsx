@@ -14,6 +14,9 @@ interface Props {
   anomalies?: Map<string, AnomalyFlag[]>;
   sessionAnomalies?: SessionAnomalySummary[];
   webUrl?: string;
+  /** AUR-276: dev-only candidate-pair count surfaced when the operator
+   *  sets `AGENTWATCH_DEBUG_LINKS=1`. Always undefined in normal use. */
+  linkCandidateCount?: number;
 }
 
 export type { Props as HeaderProps };
@@ -27,6 +30,7 @@ export function Header({
   anomalies,
   sessionAnomalies,
   webUrl,
+  linkCandidateCount,
 }: Props) {
   const breached = budget?.breachedSession || budget?.dayBreach;
   const anomalyMessages = summarizeAnomalies(anomalies);
@@ -60,6 +64,12 @@ export function Header({
               <Text dimColor>  web: </Text>
               <Text color="cyan">{webUrl}</Text>
               <Text dimColor> [w]</Text>
+            </>
+          )}
+          {linkCandidateCount != null && (
+            <>
+              <Text dimColor>  links: </Text>
+              <Text>{linkCandidateCount}</Text>
             </>
           )}
         </Text>

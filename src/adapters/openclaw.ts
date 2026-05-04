@@ -474,6 +474,11 @@ export function translateSession(
       const toolUse = extractToolUse(content);
       if (toolUse) {
         const type = inferToolType(toolUse.name);
+        // AUR-276: file_write events carry cwd so the session-correlation
+        // linker can resolve the workspace root + branch. cwd was captured
+        // on the session_start line and is held in the sessionCwd map for
+        // every event in this session.
+        const cwd = type === "file_write" ? sessionCwd.get(sessionId) : undefined;
         return base(type, {
           tool: `openclaw:${subAgent}:${toolUse.name}`,
           path: toolUse.path,
@@ -485,6 +490,7 @@ export function translateSession(
             ...(usage ? { usage } : {}),
             ...(precomputedCost != null ? { cost: precomputedCost } : {}),
             ...(model ? { model } : {}),
+            ...(cwd ? { cwd } : {}),
           },
         });
       }
