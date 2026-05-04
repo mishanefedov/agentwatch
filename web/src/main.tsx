@@ -23,6 +23,8 @@ const SessionCompactionPage = lazy(() => import("./routes/SessionCompaction").th
 const SessionGraphPage = lazy(() => import("./routes/SessionGraph").then((m) => ({ default: m.SessionGraphPage })));
 const SessionDiffsPage = lazy(() => import("./routes/SessionDiffs").then((m) => ({ default: m.SessionDiffsPage })));
 const SessionReplayPage = lazy(() => import("./routes/SessionReplay").then((m) => ({ default: m.SessionReplayPage })));
+const SessionActivityPage = lazy(() => import("./routes/SessionActivity").then((m) => ({ default: m.SessionActivityPage })));
+const ProjectActivityPage = lazy(() => import("./routes/ProjectActivity").then((m) => ({ default: m.ProjectActivityPage })));
 const TrendsPage = lazy(() => import("./routes/Trends").then((m) => ({ default: m.TrendsPage })));
 const SettingsShell = lazy(() => import("./routes/Settings").then((m) => ({ default: m.SettingsShell })));
 const BudgetsSettings = lazy(() => import("./routes/Settings").then((m) => ({ default: m.BudgetsSettings })));
@@ -54,6 +56,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="sessions/:id/graph" element={L(<SessionGraphPage />)} />
             <Route path="sessions/:id/diffs" element={L(<SessionDiffsPage />)} />
             <Route path="sessions/:id/replay" element={L(<SessionReplayPage />)} />
+            <Route path="sessions/:id/activity" element={L(<SessionActivityPage />)} />
+            <Route path="projects/:name/activity" element={L(<ProjectActivityPage />)} />
             <Route path="events/:id" element={<EventDetailPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="logs" element={<LogsPage />} />
