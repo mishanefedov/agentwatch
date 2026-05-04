@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { agentColor, formatDateTime, formatUSD } from "../lib/format";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, PieChart } from "lucide-react";
 import clsx from "clsx";
 
 export function ProjectDetailPage() {
@@ -23,6 +23,12 @@ export function ProjectDetailPage() {
         </Link>
         <h1 className="text-lg font-bold">{decodeURIComponent(name)}</h1>
         <span className="text-sm text-fg-dim">{sessions.length} sessions</span>
+        <Link
+          to={`/projects/${encodeURIComponent(name)}/activity`}
+          className="ml-auto text-xs text-fg-dim hover:text-accent flex items-center gap-1"
+        >
+          <PieChart className="w-3.5 h-3.5" /> activity
+        </Link>
       </div>
       <table className="w-full text-sm">
         <thead className="sticky top-0 bg-bg-surface border-b border-bg-border">

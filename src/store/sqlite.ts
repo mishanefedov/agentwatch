@@ -65,6 +65,9 @@ export interface ActivityBucket {
   category: string;
   eventCount: number;
   costUsd: number;
+  /** Distinct sessions in this category. Only populated by activityByProject;
+   *  always 0 (or absent) for activityBySession. */
+  sessionsTouched?: number;
 }
 
 export interface EventStore {
@@ -556,7 +559,8 @@ function buildStore(db: Database.Database): EventStore {
         .prepare(
           `SELECT COALESCE(category, 'chat') AS category,
                   COUNT(*) AS event_count,
-                  COALESCE(SUM(cost_usd), 0) AS cost_total
+                  COALESCE(SUM(cost_usd), 0) AS cost_total,
+                  COUNT(DISTINCT session_id) AS sessions_touched
            FROM events
            WHERE project = ?
            GROUP BY COALESCE(category, 'chat')`,
@@ -565,12 +569,14 @@ function buildStore(db: Database.Database): EventStore {
         category: string;
         event_count: number;
         cost_total: number;
+        sessions_touched: number;
       }>;
       return rows
         .map((r) => ({
           category: r.category,
           eventCount: r.event_count,
           costUsd: r.cost_total,
+          sessionsTouched: r.sessions_touched,
         }))
         .sort((a, b) => b.eventCount - a.eventCount);
     },
