@@ -103,6 +103,12 @@ export interface EventDetails {
   parseErrorCount?: number;
   /** Truncated preview of the most recent unparseable line. */
   parseErrorSample?: string;
+  /** Working directory of the originating session at emit time. Carried on
+   *  file_write / file_change events so the AUR-276 session-correlation
+   *  linker can resolve same-workspace + same-branch matches without
+   *  re-querying the adapter. Adapter populates from Claude `obj.cwd`
+   *  or OpenClaw `sessionCwd`; null when the adapter has no cwd context. */
+  cwd?: string;
   /** Activity category — one of ACTIVITY_CATEGORIES. Heuristically assigned
    *  on emit by the classify wrapper (AUR-264). Used by the per-session
    *  and per-project activity views to answer "where is my spend going?". */

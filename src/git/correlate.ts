@@ -129,6 +129,21 @@ export function gitCommonDir(repoPath: string): string | null {
   }
 }
 
+/** Current branch name at `repoPath`. Returns `null` for non-git dirs,
+ *  detached HEAD (where `--abbrev-ref HEAD` reports the literal string
+ *  `HEAD`), or any git failure. AUR-276 uses this — wrap with the
+ *  branch-cache helper before calling on a hot path. */
+export function getCurrentBranch(repoPath: string): string | null {
+  try {
+    const out = runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoPath });
+    const branch = out.trim();
+    if (!branch || branch === "HEAD") return null;
+    return branch;
+  } catch {
+    return null;
+  }
+}
+
 /** List commits in `[since, until]` (both ISO). Returns oldest-first.
  *  Skips merge commits (--no-merges) so the cost-per-commit metric
  *  isn't diluted by routine integration commits. */
