@@ -75,6 +75,23 @@ export const api = {
       `/api/sessions/${encodeURIComponent(id)}/graph`,
     ),
 
+  sessionActivity: (id: string) =>
+    getJson<{
+      sessionId: string;
+      buckets: Array<{ category: string; eventCount: number; costUsd: number }>;
+    }>(`/api/sessions/${encodeURIComponent(id)}/activity`),
+
+  projectActivity: (name: string) =>
+    getJson<{
+      project: string;
+      buckets: Array<{
+        category: string;
+        eventCount: number;
+        costUsd: number;
+        sessionsTouched?: number;
+      }>;
+    }>(`/api/projects/${encodeURIComponent(name)}/activity`),
+
   search: (
     query: string,
     mode: "live" | "cross" | "semantic" = "live",

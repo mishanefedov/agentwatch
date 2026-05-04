@@ -51,6 +51,7 @@ export interface AgentEvent {
     durationMs?: number;
     toolError?: boolean;
     subAgentId?: string;
+    category?: string;
   };
 }
 
