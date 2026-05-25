@@ -10,6 +10,8 @@ import { registerSpawn } from "../util/spawn-tracker.js";
 import { costOf, parseUsage } from "../util/cost.js";
 import { markAgentWrite } from "../util/recent-writes.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
+import { backfillStartOffset } from "../util/backfill.js";
+import { createBackfillQueue } from "../util/backfill-queue.js";
 import { createParseErrorTracker } from "../util/parse-errors.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
@@ -73,7 +75,7 @@ export function startClaudeAdapter(sink: Emit): () => void {
     const size = safeSize(file);
     let cursor = cursors.get(file);
     if (!cursor) {
-      const start = isInitialAdd ? Math.max(0, size - BACKFILL_BYTES) : size;
+      const start = backfillStartOffset(file, size, isInitialAdd, BACKFILL_BYTES);
       cursor = { offset: start };
       cursors.set(file, cursor);
     }
@@ -155,8 +157,18 @@ export function startClaudeAdapter(sink: Emit): () => void {
     }
   };
 
-  watcher.on("add", (f) => process(f, true));
+  // Initial-scan files drain one per macrotask so the event loop stays
+  // free for HTTP/SSE during startup; live adds (post-scan) process inline.
+  let scanReady = false;
+  const backfillQueue = createBackfillQueue((f) => process(f, true));
+  watcher.on("add", (f) => {
+    if (scanReady) process(f, true);
+    else backfillQueue.enqueue(f);
+  });
   watcher.on("change", (f) => process(f, false));
+  watcher.on("ready", () => {
+    scanReady = true;
+  });
   watcher.on("error", (err) => {
     if (typeof err === "object" && err !== null) {
       const code = (err as { code?: string }).code;

@@ -5,7 +5,8 @@ import { Timeline } from "./Timeline.js";
 import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
 import { Breadcrumb } from "./Breadcrumb.js";
-import { computeBudgetStatus } from "../util/budgets.js";
+import { budgetStatusFromTotals, computeBudgetStatus } from "../util/budgets.js";
+import { setStaleSkipEnabled } from "../util/backfill.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { watchTriggers } from "../util/triggers.js";
 import {
@@ -130,6 +131,9 @@ export function App() {
       try {
         const seed = store.listRecentEvents({ limit: 500, order: "desc" });
         if (seed.length > 0) dispatch({ type: "events-batch", events: seed });
+        // Only skip stale files' backfill once the store has history to seed
+        // from — otherwise a fresh/empty store would drop their events.
+        setStaleSkipEnabled(seed.length > 0);
       } catch {
         // store may be unavailable; live tail will fill from adapters
       }
@@ -224,22 +228,24 @@ export function App() {
   // any new event grows the ring and busts these memos.
   const eventsRef = state.events;
 
+  // Decouple the expensive store-backed rollups (budget reads up to 50k rows,
+  // anomalies 5k) from the per-event render. Recomputing them on every event
+  // pegs the shared event loop on large DBs — which freezes the TUI *and*
+  // starves the in-process web server (press `w`). Tick every 2.5s instead.
+  const [rollupTick, setRollupTick] = useState(0);
+  useEffect(() => {
+    if (!store) return;
+    const id = setInterval(() => setRollupTick((t) => t + 1), 2500);
+    return () => clearInterval(id);
+  }, [store]);
+
   const budgetStatus = useMemo(() => {
     if (!store) return computeBudgetStatus(eventsRef);
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const since = todayStart.toISOString();
-    // Per-session caps are checked against per-session totals — capped at 30 days
-    // so a long-running session that started yesterday is still seen. Day rollup
-    // filters by ts inside computeBudgetStatus.
-    const monthAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    const events = store.listRecentEvents({
-      sinceTs: monthAgo < since ? monthAgo : since,
-      limit: 50_000,
-      order: "asc",
-    });
-    return computeBudgetStatus(events);
-  }, [eventsRef, store]);
+    // Aggregate in SQL (~20ms) instead of pulling up to 50k rows into JS
+    // (~1s) on every tick — the latter intermittently froze the shared loop.
+    const { dayCost, maxSession } = store.budgetRollup();
+    return budgetStatusFromTotals(dayCost, maxSession);
+  }, [store ? rollupTick : eventsRef, store]);
 
   const anomalies = useMemo(() => {
     const source = store
@@ -286,7 +292,7 @@ export function App() {
       }
     }
     return out;
-  }, [eventsRef, store]);
+  }, [store ? rollupTick : eventsRef, store]);
 
   // Budget-breach notifications (once per distinct breach).
   const budgetBreachKey = [
