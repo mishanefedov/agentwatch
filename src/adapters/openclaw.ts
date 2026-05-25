@@ -7,6 +7,7 @@ import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
 import { backfillStartOffset } from "../util/backfill.js";
+import { createBackfillQueue } from "../util/backfill-queue.js";
 import { createParseErrorTracker } from "../util/parse-errors.js";
 import {
   classifySessionKey,
@@ -134,8 +135,18 @@ export function startOpenClawAdapter(sink: Emit): () => void {
     if (!sessionRe.test(f)) return;
     processSession(f, initial, cursors, normalized, parseErrors);
   };
-  sessionsWatcher.on("add", (f) => handleSession(f, true));
+  // Initial-scan files drain one per macrotask so the event loop stays
+  // free for HTTP/SSE during startup; live adds (post-scan) process inline.
+  let sessionsReady = false;
+  const sessionBackfillQueue = createBackfillQueue((f) => handleSession(f, true));
+  sessionsWatcher.on("add", (f) => {
+    if (sessionsReady) handleSession(f, true);
+    else sessionBackfillQueue.enqueue(f);
+  });
   sessionsWatcher.on("change", (f) => handleSession(f, false));
+  sessionsWatcher.on("ready", () => {
+    sessionsReady = true;
+  });
   sessionsWatcher.on("error", swallow);
   stoppers.push(() => {
     void sessionsWatcher.close();
