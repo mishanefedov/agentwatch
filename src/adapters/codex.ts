@@ -10,7 +10,7 @@ import { consumeSpawn } from "../util/spawn-tracker.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
 import { createParseErrorTracker } from "../util/parse-errors.js";
 
-const BACKFILL_BYTES = 4 * 1024 * 1024;
+const BACKFILL_BYTES = 512 * 1024;
 
 export function codexSessionsDir(home: string = os.homedir()): string {
   return join(home, ".codex", "sessions");

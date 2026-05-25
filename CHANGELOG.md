@@ -10,6 +10,18 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-26
+
+### Performance
+- **Web dashboard opens ~10x faster on large installs.** `serve` now seeds the
+  timeline from the SQLite store on startup (~0.5s to responsive) instead of
+  blocking the event loop on every session file's backfill. On a ~1 GB history
+  the first `/api/events` call dropped from ~12s to ~1.4s.
+- Adapters now start on the next tick (server answers requests first) and the
+  per-file backfill window shrank from 4 MB to 512 KB — history comes from the
+  store, so the backfill only needs to cover the gap since the last run.
+- `/api/events` `limit` is clamped to 2,000 to avoid multi-hundred-MB responses.
+
 ## [0.1.0] — 2026-05-03
 
 ### Added — v0.1 foundation
