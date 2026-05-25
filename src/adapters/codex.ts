@@ -9,6 +9,7 @@ import { costOf } from "../util/cost.js";
 import { consumeSpawn } from "../util/spawn-tracker.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
 import { backfillStartOffset } from "../util/backfill.js";
+import { createBackfillQueue } from "../util/backfill-queue.js";
 import { createParseErrorTracker } from "../util/parse-errors.js";
 
 const BACKFILL_BYTES = 512 * 1024;
@@ -210,8 +211,18 @@ export function startCodexAdapter(sink: EventSink): () => void {
     }
   };
 
-  watcher.on("add", (f) => handle(f, true));
+  // Initial-scan files drain one per macrotask so the event loop stays
+  // free for HTTP/SSE during startup; live adds (post-scan) process inline.
+  let scanReady = false;
+  const backfillQueue = createBackfillQueue((f) => handle(f, true));
+  watcher.on("add", (f) => {
+    if (scanReady) handle(f, true);
+    else backfillQueue.enqueue(f);
+  });
   watcher.on("change", (f) => handle(f, false));
+  watcher.on("ready", () => {
+    scanReady = true;
+  });
   watcher.on("error", (err) => {
     if (typeof err === "object" && err !== null) {
       const code = (err as { code?: string }).code;

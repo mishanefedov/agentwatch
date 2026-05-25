@@ -79,18 +79,25 @@ export function computeBudgetStatus(
     if (t >= todayMs) dayCost += c;
   }
 
+  return budgetStatusFromTotals(dayCost, maxSession, budgets);
+}
+
+/** Build a BudgetStatus from pre-aggregated totals. Shared by the in-memory
+ *  path (computeBudgetStatus) and the SQL fast path (store.budgetRollup) so
+ *  the breach semantics never diverge. */
+export function budgetStatusFromTotals(
+  dayCost: number,
+  maxSession: { id: string; cost: number },
+  budgets: Budgets = loadBudgets(),
+): BudgetStatus {
   const status: BudgetStatus = {
     sessionCost: maxSession.cost,
     dayCost,
     perSessionUsd: budgets.perSessionUsd,
     perDayUsd: budgets.perDayUsd,
-    dayBreach:
-      budgets.perDayUsd != null && dayCost > budgets.perDayUsd,
+    dayBreach: budgets.perDayUsd != null && dayCost > budgets.perDayUsd,
   };
-  if (
-    budgets.perSessionUsd != null &&
-    maxSession.cost > budgets.perSessionUsd
-  ) {
+  if (budgets.perSessionUsd != null && maxSession.cost > budgets.perSessionUsd) {
     status.breachedSession = maxSession.id || "(unknown)";
   }
   return status;

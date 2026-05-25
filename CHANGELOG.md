@@ -13,11 +13,19 @@ layout can change freely within a minor version.
 ## [0.1.2] — 2026-05-26
 
 ### Performance
-- **TUI + in-process web no longer freeze on large histories.** The budget and
-  anomaly rollups re-queried up to 50k rows from SQLite on *every* event, pegging
-  the shared event loop — which froze the TUI (keys like `q` stopped responding)
-  and starved the in-process web server when you pressed `w`. They now recompute
-  on a ~2.5s tick instead of per event; the live timeline still updates instantly.
+- **TUI and the in-process web UI (`w`) no longer stall on large histories.**
+  On a ~1GB history the web UI went from minutes to open down to a couple of
+  seconds. Several costs that pegged the shared event loop are gone:
+  - Budget + anomaly rollups recompute on a ~2.5s tick instead of on every event
+    (keys like `q` stopped responding before; the live timeline still updates
+    instantly).
+  - The budget rollup now aggregates in SQL (~20ms) instead of pulling up to 50k
+    rows into JS (~1s) on every tick.
+  - Adapter initial-scan backfill drains one file per macrotask, so HTTP/SSE stay
+    responsive during startup instead of blocking on a file-read storm.
+  - Stale (>48h) session files are skipped on startup only when the store already
+    has their history — a fresh/empty/unavailable store still backfills fully, so
+    there is no first-run data loss.
 
 ## [0.1.1] — 2026-05-26
 

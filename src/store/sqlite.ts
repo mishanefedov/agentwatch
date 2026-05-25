@@ -115,6 +115,10 @@ export interface EventStore {
    *  (budget rollups, anomaly histories) that need more than the live
    *  in-memory ring but less than the full event table. */
   listRecentEvents(opts?: ListRecentEventsOptions): AgentEvent[];
+  /** Fast budget aggregation via SQL: today's total cost + the top session
+   *  (last 30d) by total cost. Avoids pulling tens of thousands of rows into
+   *  JS on every rollup tick — the per-event 50k pull blocked the loop ~1s. */
+  budgetRollup(): { dayCost: number; maxSession: { id: string; cost: number } };
   listSessions(opts?: ListSessionsOptions): SessionSummary[];
   listProjects(): ProjectSummary[];
   searchFts(query: string, opts?: { limit?: number }): FtsHit[];
@@ -648,6 +652,25 @@ function buildStore(db: Database.Database): EventStore {
     listSessionEvents(sessionId) {
       const rows = sessionEventsStmt.all(sessionId) as RawEventRow[];
       return rows.map(rowToEvent);
+    },
+    budgetRollup() {
+      const todayStart = new Date();
+      todayStart.setUTCHours(0, 0, 0, 0);
+      const monthAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const day = db
+        .prepare("SELECT SUM(cost_usd) AS c FROM events WHERE ts >= ?")
+        .get(todayStart.toISOString()) as { c: number | null };
+      const top = db
+        .prepare(
+          "SELECT session_id, cost_usd FROM sessions WHERE last_ts >= ? ORDER BY cost_usd DESC LIMIT 1",
+        )
+        .get(monthAgo) as { session_id: string; cost_usd: number } | undefined;
+      return {
+        dayCost: day.c ?? 0,
+        maxSession: top
+          ? { id: top.session_id, cost: top.cost_usd }
+          : { id: "", cost: 0 },
+      };
     },
     listRecentEvents(opts = {}) {
       const limit = clamp(opts.limit ?? 1000, 1, 50_000);

@@ -5,7 +5,7 @@ import { Timeline } from "./Timeline.js";
 import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
 import { Breadcrumb } from "./Breadcrumb.js";
-import { computeBudgetStatus } from "../util/budgets.js";
+import { budgetStatusFromTotals, computeBudgetStatus } from "../util/budgets.js";
 import { setStaleSkipEnabled } from "../util/backfill.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { watchTriggers } from "../util/triggers.js";
@@ -241,19 +241,10 @@ export function App() {
 
   const budgetStatus = useMemo(() => {
     if (!store) return computeBudgetStatus(eventsRef);
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const since = todayStart.toISOString();
-    // Per-session caps are checked against per-session totals — capped at 30 days
-    // so a long-running session that started yesterday is still seen. Day rollup
-    // filters by ts inside computeBudgetStatus.
-    const monthAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    const events = store.listRecentEvents({
-      sinceTs: monthAgo < since ? monthAgo : since,
-      limit: 50_000,
-      order: "asc",
-    });
-    return computeBudgetStatus(events);
+    // Aggregate in SQL (~20ms) instead of pulling up to 50k rows into JS
+    // (~1s) on every tick — the latter intermittently froze the shared loop.
+    const { dayCost, maxSession } = store.budgetRollup();
+    return budgetStatusFromTotals(dayCost, maxSession);
   }, [store ? rollupTick : eventsRef, store]);
 
   const anomalies = useMemo(() => {
