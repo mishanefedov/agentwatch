@@ -224,6 +224,17 @@ export function App() {
   // any new event grows the ring and busts these memos.
   const eventsRef = state.events;
 
+  // Decouple the expensive store-backed rollups (budget reads up to 50k rows,
+  // anomalies 5k) from the per-event render. Recomputing them on every event
+  // pegs the shared event loop on large DBs — which freezes the TUI *and*
+  // starves the in-process web server (press `w`). Tick every 2.5s instead.
+  const [rollupTick, setRollupTick] = useState(0);
+  useEffect(() => {
+    if (!store) return;
+    const id = setInterval(() => setRollupTick((t) => t + 1), 2500);
+    return () => clearInterval(id);
+  }, [store]);
+
   const budgetStatus = useMemo(() => {
     if (!store) return computeBudgetStatus(eventsRef);
     const todayStart = new Date();
@@ -239,7 +250,7 @@ export function App() {
       order: "asc",
     });
     return computeBudgetStatus(events);
-  }, [eventsRef, store]);
+  }, [store ? rollupTick : eventsRef, store]);
 
   const anomalies = useMemo(() => {
     const source = store
@@ -286,7 +297,7 @@ export function App() {
       }
     }
     return out;
-  }, [eventsRef, store]);
+  }, [store ? rollupTick : eventsRef, store]);
 
   // Budget-breach notifications (once per distinct breach).
   const budgetBreachKey = [
