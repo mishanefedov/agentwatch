@@ -1,8 +1,8 @@
 # Contributing to agentwatch
 
-Thanks for taking a look. agentwatch is in early v0 — most "should we build X?"
-answers are in the [roadmap](https://linear.app/example/project/agentwatch-748d6aa1c20a)
-(public-readable) or just open an issue and ask.
+Thanks for taking a look. agentwatch is in early v0 — if you're wondering "should
+we build X?", open an issue and ask. Scope is deliberately narrow (see the non-goals
+in the README).
 
 ## What's welcome
 
@@ -91,7 +91,7 @@ Every adapter:
 
 - Issues for bug reports + scoped feature requests
 - Discussions for "have you considered…" conversations
-- Email `misha@example.com` for anything sensitive
+- For anything sensitive, open a private [Security Advisory](https://github.com/mishanefedov/agentwatch/security/advisories/new)
 
 ## License
 
