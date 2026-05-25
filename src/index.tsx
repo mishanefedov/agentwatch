@@ -268,6 +268,10 @@ if (arg === "serve") {
     try {
       const seed = store.listRecentEvents({ limit: 5000, order: "desc" });
       for (let i = seed.length - 1; i >= 0; i--) addEventToServer(server, seed[i]!);
+      // Only skip stale files' backfill once the store has history to seed
+      // from — otherwise a fresh/empty store would drop their events.
+      const { setStaleSkipEnabled } = await import("./util/backfill.js");
+      setStaleSkipEnabled(seed.length > 0);
     } catch (err) {
       process.stderr.write(`[agentwatch] ring seed skipped: ${String(err)}\n`);
     }
