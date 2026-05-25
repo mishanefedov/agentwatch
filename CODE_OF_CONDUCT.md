@@ -12,7 +12,8 @@ expectations apply if you represent the project.
 
 ## Reporting
 
-Email `misha@example.com`. Reports are confidential and acted on in good faith.
+Report confidentially via a private [GitHub Security Advisory](https://github.com/mishanefedov/agentwatch/security/advisories/new).
+Reports are kept confidential and acted on in good faith.
 
 ## Enforcement
 

@@ -110,11 +110,6 @@ layout can change freely within a minor version.
   to disk (AUR-214) — this is a structural limit of what those agents write,
   not a missing adapter feature.
 
-### Internal
-- internal-docs hardening for the autonomous agentwatch-bot harness
-  (AUR-241 timeout wrappers, AUR-242 defensive `last-triage.txt` initializer).
-  These are agent-harness changes only; no user-facing impact.
-
 ## [0.0.3] — 2026-04-15
 
 ### Added — full multi-agent + moats wave

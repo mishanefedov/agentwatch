@@ -683,7 +683,7 @@ Local-first is a hard invariant.
 - **All files read-only** except the clipboard (on `y`) and `./agentwatch-export/` (on `e`).
 - Every path agentwatch reads is documented in [SECURITY.md](./SECURITY.md).
 
-Report vulnerabilities privately: `misha@example.com` or via a
+Report vulnerabilities privately via a
 [Security Advisory](https://github.com/mishanefedov/agentwatch/security/advisories/new).
 
 ---

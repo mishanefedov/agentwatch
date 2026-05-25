@@ -9,8 +9,8 @@ public issue.
 
 ## Reporting
 
-- **Email:** `misha@example.com`
-- **GitHub:** open a [Security Advisory](https://github.com/mishanefedov/agentwatch/security/advisories/new) (private)
+Open a private [Security Advisory](https://github.com/mishanefedov/agentwatch/security/advisories/new)
+on GitHub — that keeps the report confidential until a fix is out.
 
 Please include:
 
