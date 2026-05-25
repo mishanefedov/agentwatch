@@ -15,10 +15,24 @@ function mtimeMs(file: string): number {
   }
 }
 
-/** Byte offset to start reading a file from. Live appends and stale files
- *  start at EOF (`size`); recently-modified files on the initial scan are
- *  backfilled `backfillBytes` behind EOF to catch turns written while
- *  agentwatch was off. */
+// Skipping stale files' backfill is only safe once the SQLite store holds
+// prior history to seed the timeline from. On a fresh install, a deleted /
+// pruned DB, or a store-open failure, skipping would drop those files'
+// events entirely (they were never ingested). The startup path enables this
+// only after confirming the store is non-empty; default off = always backfill.
+let staleSkipEnabled = false;
+
+/** Set once at startup, before adapters start. Pass `true` only when the
+ *  store already has history (so stale files are already ingested). */
+export function setStaleSkipEnabled(enabled: boolean): void {
+  staleSkipEnabled = enabled;
+}
+
+/** Byte offset to start reading a file from. Live appends start at EOF
+ *  (`size`). On the initial scan, recently-modified files are backfilled
+ *  `backfillBytes` behind EOF to catch turns written while agentwatch was
+ *  off; stale files start at EOF only when stale-skip is enabled (the store
+ *  already has their history). */
 export function backfillStartOffset(
   file: string,
   size: number,
@@ -26,6 +40,8 @@ export function backfillStartOffset(
   backfillBytes: number,
 ): number {
   if (!isInitialAdd) return size;
-  if (mtimeMs(file) < Date.now() - BACKFILL_MAX_AGE_MS) return size;
+  if (staleSkipEnabled && mtimeMs(file) < Date.now() - BACKFILL_MAX_AGE_MS) {
+    return size;
+  }
   return Math.max(0, size - backfillBytes);
 }

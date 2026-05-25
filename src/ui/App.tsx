@@ -6,6 +6,7 @@ import { AgentPanel } from "./AgentPanel.js";
 import { Header } from "./Header.js";
 import { Breadcrumb } from "./Breadcrumb.js";
 import { computeBudgetStatus } from "../util/budgets.js";
+import { setStaleSkipEnabled } from "../util/backfill.js";
 import { emitEventSpan, initOtel, otelEnabled } from "../util/otel.js";
 import { watchTriggers } from "../util/triggers.js";
 import {
@@ -130,6 +131,9 @@ export function App() {
       try {
         const seed = store.listRecentEvents({ limit: 500, order: "desc" });
         if (seed.length > 0) dispatch({ type: "events-batch", events: seed });
+        // Only skip stale files' backfill once the store has history to seed
+        // from — otherwise a fresh/empty store would drop their events.
+        setStaleSkipEnabled(seed.length > 0);
       } catch {
         // store may be unavailable; live tail will fill from adapters
       }
