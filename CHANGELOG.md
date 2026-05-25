@@ -10,6 +10,15 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-26
+
+### Performance
+- **TUI + in-process web no longer freeze on large histories.** The budget and
+  anomaly rollups re-queried up to 50k rows from SQLite on *every* event, pegging
+  the shared event loop — which froze the TUI (keys like `q` stopped responding)
+  and starved the in-process web server when you pressed `w`. They now recompute
+  on a ~2.5s tick instead of per event; the live timeline still updates instantly.
+
 ## [0.1.1] — 2026-05-26
 
 ### Performance
