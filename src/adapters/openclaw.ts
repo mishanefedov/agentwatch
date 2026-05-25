@@ -313,7 +313,7 @@ function processAudit(
 }
 
 /** Same backfill window as Claude adapter; see its comment. */
-const BACKFILL_BYTES = 4 * 1024 * 1024;
+const BACKFILL_BYTES = 512 * 1024;
 
 function streamLines(
   file: string,

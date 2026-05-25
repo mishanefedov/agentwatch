@@ -259,11 +259,29 @@ if (arg === "serve") {
   const classifiedSink = withClassifier(linkedSink);
   const sink = withClaudeHookDedup(classifiedSink);
   server.setHookSink(sink);
-  const adapters = startAllAdapters(sink, workspace);
+  // Seed the in-memory ring from the durable store so the web UI shows
+  // history immediately, instead of waiting on the adapters' file backfill
+  // (which, on a large install, can block the event loop for 10+ seconds).
+  // The store already holds everything prior runs ingested; dedup at the
+  // wrapSinkWithStore boundary handles any re-emit overlap.
+  if (store) {
+    try {
+      const seed = store.listRecentEvents({ limit: 5000, order: "desc" });
+      for (let i = seed.length - 1; i >= 0; i--) addEventToServer(server, seed[i]!);
+    } catch (err) {
+      process.stderr.write(`[agentwatch] ring seed skipped: ${String(err)}\n`);
+    }
+  }
+  process.stderr.write(`[agentwatch] serving ${server.url}\n`);
+  // Start adapters on the next tick so the server is already accepting
+  // requests (served from the seeded ring) before the file backfill runs.
+  let adapters: ReturnType<typeof startAllAdapters> = [];
+  setImmediate(() => {
+    adapters = startAllAdapters(sink, workspace);
+  });
   onShutdown(() => stopAllAdapters(adapters));
   onShutdown(() => server.stop());
   if (store) onShutdown(() => store?.close());
-  process.stderr.write(`[agentwatch] serving ${server.url}\n`);
   // Signal handling happens at the bottom of this file via the global
   // shutdown-hooks wiring; the serve path just registers its cleanup.
   await new Promise(() => undefined);
