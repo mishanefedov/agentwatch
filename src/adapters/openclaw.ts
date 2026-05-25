@@ -6,6 +6,7 @@ import type { AgentEvent, EventType } from "../schema.js";
 import { clampTs, riskOf } from "../schema.js";
 import { nextId } from "../util/ids.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
+import { backfillStartOffset } from "../util/backfill.js";
 import { createParseErrorTracker } from "../util/parse-errors.js";
 import {
   classifySessionKey,
@@ -324,8 +325,7 @@ function streamLines(
   const size = safeSize(file);
   let cursor = cursors.get(file);
   if (!cursor) {
-    const backfillStart = Math.max(0, size - BACKFILL_BYTES);
-    cursor = { offset: isInitialAdd ? backfillStart : size };
+    cursor = { offset: backfillStartOffset(file, size, isInitialAdd, BACKFILL_BYTES) };
     cursors.set(file, cursor);
   }
   if (size <= cursor.offset) return;

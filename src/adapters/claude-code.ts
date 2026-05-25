@@ -10,6 +10,7 @@ import { registerSpawn } from "../util/spawn-tracker.js";
 import { costOf, parseUsage } from "../util/cost.js";
 import { markAgentWrite } from "../util/recent-writes.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
+import { backfillStartOffset } from "../util/backfill.js";
 import { createParseErrorTracker } from "../util/parse-errors.js";
 
 type Emit = EventSink | ((e: AgentEvent) => void);
@@ -73,7 +74,7 @@ export function startClaudeAdapter(sink: Emit): () => void {
     const size = safeSize(file);
     let cursor = cursors.get(file);
     if (!cursor) {
-      const start = isInitialAdd ? Math.max(0, size - BACKFILL_BYTES) : size;
+      const start = backfillStartOffset(file, size, isInitialAdd, BACKFILL_BYTES);
       cursor = { offset: start };
       cursors.set(file, cursor);
     }

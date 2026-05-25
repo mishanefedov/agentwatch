@@ -8,6 +8,7 @@ import { nextId } from "../util/ids.js";
 import { costOf } from "../util/cost.js";
 import { consumeSpawn } from "../util/spawn-tracker.js";
 import { readNewlineTerminatedLines } from "../util/jsonl-stream.js";
+import { backfillStartOffset } from "../util/backfill.js";
 import { createParseErrorTracker } from "../util/parse-errors.js";
 
 const BACKFILL_BYTES = 512 * 1024;
@@ -57,7 +58,7 @@ export function startCodexAdapter(sink: EventSink): () => void {
     const size = safeSize(file);
     let cursor = cursors.get(file);
     if (!cursor) {
-      const start = isInitialAdd ? Math.max(0, size - BACKFILL_BYTES) : size;
+      const start = backfillStartOffset(file, size, isInitialAdd, BACKFILL_BYTES);
       cursor = {
         offset: start,
         project: "",
