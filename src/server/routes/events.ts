@@ -13,7 +13,7 @@ interface EventQuery {
 
 export function registerEventRoutes(app: FastifyInstance, events: AgentEvent[]): void {
   app.get<{ Querystring: EventQuery }>("/api/events", async (req) => {
-    const limit = clamp(parseInt(req.query.limit ?? "100", 10) || 100, 1, 50_000);
+    const limit = clamp(parseInt(req.query.limit ?? "100", 10) || 100, 1, 2_000);
     const beforeMs = req.query.before ? Date.parse(req.query.before) : null;
     // Buffer is stored oldest-first for O(1) append. Walk backwards to
     // build newest-first results without materializing a reversed copy.

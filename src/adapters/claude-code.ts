@@ -38,11 +38,12 @@ interface FileCursor {
 }
 
 /** When agentwatch restarts, each active session is backfilled from this
- *  many bytes behind EOF. 64 KB is ~20-50 turns — too small for heavy
- *  users who closed the TUI for a few hours. 4 MB covers ~days of a
- *  typical Claude session without blowing up memory (still bounded by
- *  MAX_EVENTS = 500 in the buffer). */
-const BACKFILL_BYTES = 4 * 1024 * 1024;
+ *  many bytes behind EOF — just enough to catch turns written while
+ *  agentwatch was off. History itself comes from the SQLite store (the TUI
+ *  and `serve` both seed their timeline from it), so this only needs to
+ *  cover the gap, not days. Keeping it small keeps startup from blocking
+ *  the event loop while every session file is re-read. */
+const BACKFILL_BYTES = 512 * 1024;
 
 export function startClaudeAdapter(sink: Emit): () => void {
   const normalized = normalizeSink(sink);
