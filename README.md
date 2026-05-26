@@ -24,12 +24,16 @@ they went off the rails. All local: no cloud, no telemetry, no sign-in.
 > self-onboards you in three steps (install → verify → run), no account needed.
 
 <div align="center">
-  <img src="./docs/timeline.png" alt="agentwatch web UI — unified timeline of AI-agent events with per-event risk, type, and session" width="1100" />
+  <img src="./docs/demo.gif" alt="agentwatch — doctor detects your agents, then a live multi-agent timeline in the TUI" width="1100" />
 </div>
 
 **The TUI is the live tail; the web UI is where you drill in** — projects, sessions,
 token charts, compaction sparklines, call graphs, diff attribution, replay, anomaly
 triage. Both run in one process. Press `w` in the TUI to open the browser.
+
+<div align="center">
+  <img src="./docs/timeline.png" alt="agentwatch web UI — unified timeline of AI-agent events with per-event risk, type, and session" width="1100" />
+</div>
 
 ---
 
