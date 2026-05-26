@@ -1,42 +1,39 @@
 <div align="center">
 
-# agentwatch
+# 📟 agentwatch
 
-**Local observability + control plane for every AI coding agent on your machine.**
+### Five AI agents on one machine, and no idea what any of them just did.
 
-A terminal live-tail *and* a browser dashboard — one process, one event
-stream, served from `localhost`. Unified timeline across Claude Code,
-Codex, Gemini CLI, Cursor, Hermes, and OpenClaw. Token + cost accounting,
-compaction + anomaly detection, hybrid search, SVG call graphs,
-monaco-style diff attribution, agent-aware replay ("what would the agent
-say if I edited the prompt?"), policy editor, MCP server agents can query
-their own history from, and an OpenTelemetry exporter with `gen_ai.*`
-semantic conventions. All local. No cloud. No telemetry. No sign-in.
+**agentwatch is one local timeline for every coding agent you run** — Claude Code,
+Codex, Gemini CLI, Cursor, Hermes, OpenClaw. What they ran, what it cost, and when
+they went off the rails. All local: no cloud, no telemetry, no sign-in.
 
-[![npm](https://img.shields.io/npm/v/@misha_misha/agentwatch.svg)](https://www.npmjs.com/package/@misha_misha/agentwatch)
+[![npm](https://img.shields.io/npm/v/@misha_misha/agentwatch?logo=npm&color=cb3837)](https://www.npmjs.com/package/@misha_misha/agentwatch)
 [![CI](https://github.com/mishanefedov/agentwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/mishanefedov/agentwatch/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Node >=20](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](./package.json)
 [![MCP server](https://glama.ai/mcp/servers/mishanefedov/agentwatch/badges/score.svg)](https://glama.ai/mcp/servers/mishanefedov/agentwatch)
 
+[**Install**](#install) • [**First 60 seconds**](#first-60-seconds) • [**Features**](#features) • [**MCP**](#mcp-server-mode) • [**Compare**](#how-it-compares)
+
 </div>
+
+---
+
+> **🤖 Reading this as an AI agent?** Go straight to [`AGENTS.md`](./AGENTS.md) — it
+> self-onboards you in three steps (install → verify → run), no account needed.
 
 <div align="center">
-
-[![agentwatch on Glama](https://glama.ai/mcp/servers/mishanefedov/agentwatch/badges/card.svg)](https://glama.ai/mcp/servers/mishanefedov/agentwatch)
-
+  <img src="./docs/demo.gif" alt="agentwatch — doctor detects your agents, then a live multi-agent timeline in the TUI" width="1100" />
 </div>
+
+**The TUI is the live tail; the web UI is where you drill in** — projects, sessions,
+token charts, compaction sparklines, call graphs, diff attribution, replay, anomaly
+triage. Both run in one process. Press `w` in the TUI to open the browser.
 
 <div align="center">
-  <img src="./docs/timeline.png" alt="agentwatch web UI — unified timeline across 5 agents, each in its own workspace" width="1100" />
-  <br />
-  <img src="./docs/event-detail.png" alt="agentwatch event detail view — full command, tool I/O, usage + cost" width="1100" />
+  <img src="./docs/timeline.png" alt="agentwatch web UI — unified timeline of AI-agent events with per-event risk, type, and session" width="1100" />
 </div>
-
-**The TUI is the live tail. The web UI is where you drill in** — projects,
-sessions, token charts, compaction sparklines, SVG call graphs, diff
-attribution, replay, anomaly triage, policy editing. Both run in one
-process. Press `w` in the TUI to open the browser.
 
 ---
 
