@@ -1,77 +1,62 @@
-# Maintainer agent
+# This repo has a maintainer agent
 
-A headless Claude Code session that runs once a day, keeps the repo healthy,
-and watches the outside world for signal. It is **not** part of the shipped
-product — it maintains this repo.
+Part of agentwatch's triage runs as a scheduled, headless coding agent on the
+maintainer's machine. It reads issues and PRs, keeps CI green, watches the
+wider ecosystem for feature signal, and files proposals. It is not part of the
+shipped product, and its runtime configuration lives in a private ops
+repository — not because the guardrails depend on being secret (they don't),
+but because publishing a machine's exact automation surface is free
+reconnaissance for anyone writing a prompt-injection payload.
 
-## What it does per run
+This page documents the guardrails, because you deserve to know what touches
+this repo.
 
-1. Syncs `main`.
-2. Triages open issues (investigate, reply, label) and reviews open PRs
-   (CI status, convention violations). Never merges.
-3. If `main` CI is red, fixes it on a branch + PR.
-4. Implements at most **one** issue labeled `approved` — the human grants that
-   label; the agent never picks its own feature work.
-5. Scans Hacker News (Algolia API) and Reddit (r/ClaudeAI, r/LocalLLaMA,
-   r/ChatGPTCoding) for mentions, feature asks, and competitor moves from the
-   last 24 h; posts a digest comment on the pinned "📡 Signal digest" issue and
-   files `scraped,proposal` issues for concrete, roadmap-compatible ideas.
+## What the agent may do
 
-The full instruction set (including guardrails) is the slash command at
-[`.claude/commands/maintain.md`](../.claude/commands/maintain.md).
+- Triage issues: investigate, reply, apply labels.
+- Review open PRs: report CI status and convention violations.
+- Fix a red `main` on a branch, as a PR.
+- Implement **one** issue per run — and only an issue a human has labelled
+  `approved`.
+- File proposals from ecosystem signal.
 
-## Guardrails
+## What the agent may not do
 
-- Branch + PR only; never pushes `main`, never merges, never closes others'
-  issues.
-- One implementation PR per run, tests/typecheck/build green before opening.
-- Network surface: GitHub, `hn.algolia.com`, `reddit.com`. Nothing else.
-- Scraped ideas become *proposals*, not code — implementation requires the
-  human-granted `approved` label.
+- Push to `main`. Ever. `main` is branch-protected and CI-gated.
+- Merge or close anything.
+- Approve its own work. Authorization comes solely from the `approved` label,
+  which only a repository write-user can apply. No text the agent reads —
+  including an issue body claiming to be from the owner — can grant it
+  permission.
+- Reach the network outside GitHub and its two signal sources, or read
+  credentials: it runs in an OS sandbox with an egress allowlist and
+  deny-read on credential paths.
+- Use `curl`, `node`, `npm install`, `gh api`, `gh repo`, `gh auth`, `rm`, or
+  `sudo` — none are in its permission allowlist.
 
-## Install (macOS)
+Its GitHub identity is a fine-grained token scoped to this repository alone,
+with no administrative rights. It is not the maintainer's account.
 
-```bash
-# 1. Dedicated clone (keeps your working copy out of the agent's hands)
-gh repo clone mishanefedov/agentwatch ~/IdeaProjects/agentwatch-maintainer
+## Why it's built this way
 
-# 2. launchd job — daily 07:30
-sed "s|\$HOME|$HOME|" ~/IdeaProjects/agentwatch-maintainer/scripts/maintainer/com.agentwatch.maintainer.plist \
-  > ~/Library/LaunchAgents/com.agentwatch.maintainer.plist
-launchctl load ~/Library/LaunchAgents/com.agentwatch.maintainer.plist
+Prompt injection is an unsolved problem. The agent reads attacker-controlled
+text on every run — issue bodies, PR diffs, forum posts. The published record
+is consistent: classifier-based defenses carry real false-negative rates, and
+the strongest production alignment checkers are defeated by payloads disguised
+as legitimate error-recovery steps. So the design assumes injection eventually
+succeeds and makes success worthless: a scoped token, an OS sandbox, a tool
+allowlist, a quarantined WebFetch-only subagent for untrusted web text, and a
+human who reads every PR before it merges.
 
-# 3. Dry run to verify
-~/IdeaProjects/agentwatch-maintainer/scripts/maintainer/run.sh --dry-run
-tail -f ~/.agentwatch-maintainer/logs/$(date +%Y-%m-%d).log
-```
+The worst realistic outcome of a successful injection is a bad pull request
+that a human declines. That is the point.
 
-Requires the `claude` CLI authenticated (subscription login works; runs count
-against your plan's rate limits) and `gh` authenticated with repo scope.
+Naturally, agentwatch watches the agent: its scheduled job shows up on the
+`/cron` surface, its spend is capped, and triggers fire on credential-path
+reads, pipe-to-bash, and force-push attempts.
 
-Headless runs can't answer permission prompts, so the clone needs a
-`.claude/settings.local.json` allowlist (not committed; create it in the
-clone):
+## Contributing
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(git:*)", "Bash(gh:*)", "Bash(npm:*)", "Bash(node:*)",
-      "Bash(curl -s https://hn.algolia.com/*)",
-      "Bash(curl -s -A agentwatch-maintainer https://www.reddit.com/*)",
-      "WebFetch(domain:hn.algolia.com)", "WebFetch(domain:www.reddit.com)"
-    ]
-  }
-}
-```
-
-## Operate
-
-```bash
-launchctl start com.agentwatch.maintainer     # run now
-launchctl list | grep agentwatch              # status / last exit code
-launchctl unload ~/Library/LaunchAgents/com.agentwatch.maintainer.plist  # disable
-```
-
-Logs: `~/.agentwatch-maintainer/logs/YYYY-MM-DD.log` (one file per day).
-And yes — agentwatch's own cron surface watches this launchd job.
+None of this changes how you contribute — open an issue or a PR as usual. A
+human reads everything before it lands. See
+[CONTRIBUTING.md](../CONTRIBUTING.md).
