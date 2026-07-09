@@ -1,13 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
-import { Clock, Heart, Calendar } from "lucide-react";
+import { Clock, Heart, Calendar, Server, Terminal } from "lucide-react";
+
+function AgentBadge() {
+  return (
+    <span className="ml-2 mono text-[10px] px-1.5 py-0.5 rounded bg-accent/20 text-accent border border-accent/40">
+      agent
+    </span>
+  );
+}
 
 export function CronPage() {
   const q = useQuery({ queryKey: ["cron"], queryFn: api.cron, refetchInterval: 10_000 });
   if (q.isLoading) return <div className="p-6 text-fg-dim">loading…</div>;
   const jobs = q.data?.jobs ?? [];
   const heartbeats = q.data?.heartbeats ?? [];
+  const launchd = q.data?.launchd ?? [];
+  const crontab = q.data?.crontab ?? [];
   const scheduledEvents = q.data?.scheduledEvents ?? [];
 
   return (
@@ -74,6 +84,74 @@ export function CronPage() {
                   <td className="py-1.5 pr-4 text-fg-dim">{h.agentId ?? "—"}</td>
                   <td className="py-1.5 pr-4 text-fg-dim">{h.lastHeartbeatAt ? formatDateTime(h.lastHeartbeatAt) : "—"}</td>
                   <td className="py-1.5 text-fg-dim truncate max-w-md">{h.filePath ?? h.file ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="p-5 border-t border-bg-border">
+        <div className="flex items-center gap-2 mb-3">
+          <Server className="w-4 h-4 text-accent" />
+          <h2 className="font-bold">launchd agents</h2>
+          <span className="text-xs text-fg-dim">{launchd.length}</span>
+        </div>
+        {launchd.length === 0 && <div className="text-sm text-fg-dim">No launchd user agents detected.</div>}
+        {launchd.length > 0 && (
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs uppercase text-fg-muted">
+              <tr>
+                <th className="py-1 pr-4">label</th>
+                <th className="py-1 pr-4">schedule</th>
+                <th className="py-1 pr-4">program</th>
+                <th className="py-1 pr-4">status</th>
+                <th className="py-1">last exit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {launchd.map((a: any) => (
+                <tr key={a.label} className="border-b border-bg-border/30 mono text-xs">
+                  <td className="py-1.5 pr-4">
+                    {a.label}
+                    {a.agentTag && <AgentBadge />}
+                  </td>
+                  <td className="py-1.5 pr-4 text-fg-dim">{a.schedule ?? "—"}</td>
+                  <td className="py-1.5 pr-4 text-fg-dim truncate max-w-xs">{a.program ?? "—"}</td>
+                  <td className="py-1.5 pr-4 text-fg-dim">
+                    {a.running ? <span className="text-ok">running (pid {a.pid})</span> : a.loaded ? "loaded" : "not loaded"}
+                  </td>
+                  <td className="py-1.5 text-fg-dim">{a.lastExitStatus ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="p-5 border-t border-bg-border">
+        <div className="flex items-center gap-2 mb-3">
+          <Terminal className="w-4 h-4 text-accent" />
+          <h2 className="font-bold">crontab</h2>
+          <span className="text-xs text-fg-dim">{crontab.length}</span>
+        </div>
+        {crontab.length === 0 && <div className="text-sm text-fg-dim">No user crontab installed.</div>}
+        {crontab.length > 0 && (
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs uppercase text-fg-muted">
+              <tr>
+                <th className="py-1 pr-4">schedule</th>
+                <th className="py-1">command</th>
+              </tr>
+            </thead>
+            <tbody>
+              {crontab.map((c: any, i: number) => (
+                <tr key={i} className="border-b border-bg-border/30 mono text-xs">
+                  <td className="py-1.5 pr-4 whitespace-nowrap">{c.schedule}</td>
+                  <td className="py-1.5 text-fg-dim truncate max-w-xl">
+                    {c.command}
+                    {c.agentTag && <AgentBadge />}
+                  </td>
                 </tr>
               ))}
             </tbody>
