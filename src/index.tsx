@@ -26,6 +26,10 @@ Usage:
                               (subcommands: start | stop | status | logs)
   agentwatch hooks ...      install / uninstall / status the Claude Code hooks adapter
   agentwatch prune          drop events older than --older-than-days (default 90)
+  agentwatch reindex        build/refresh the semantic search index
+                              (runs standalone; the TUI + web UI spawn this
+                              detached instead of blocking on it — safe to
+                              run by hand too. --quiet suppresses stdout.)
   agentwatch link-candidates   dump AUR-276 session-correlation candidate pairs as JSON
                                (--session <id> to scope; --limit <n> to cap)
   agentwatch --help         show this help
@@ -42,6 +46,7 @@ Hotkeys inside the TUI:
   p       pause / resume event stream
   c       clear events
   w       open web UI in browser
+  x       cancel an in-progress semantic index build (footer shows progress)
 
 Environment:
   WORKSPACE_ROOT          override the detected workspace root
@@ -145,6 +150,13 @@ if (arg === "link-candidates") {
     store.close();
   }
   process.exit(0);
+}
+
+if (arg === "reindex") {
+  const { runReindexCli } = await import("./util/reindex-runner.js");
+  const quiet = process.argv.includes("--quiet");
+  const result = await runReindexCli({ quiet });
+  process.exit(result.code);
 }
 
 if (arg === "prune") {

@@ -89,18 +89,48 @@ export function registerSearchRoutes(
       };
     }
 
-    // Semantic: lazy-import so the model download only happens on first request.
+    // Semantic: lazy-import so the model download only happens once a
+    // semantic search is actually requested.
     try {
-      const { searchHybrid, hasIndex, indexStats, loadEmbedder, searchBm25Only } =
-        await import("../../util/semantic-index.js");
-      if (!hasIndex() || indexStats().vectors === 0) {
-        // Bail out to BM25 rather than blocking for a ~80MB model download
-        // on a web request. Surface a status so the UI can show a hint.
+      const {
+        searchHybrid,
+        hasIndex,
+        indexStats,
+        loadEmbedder,
+        searchBm25Only,
+        readReindexMeta,
+      } = await import("../../util/semantic-index.js");
+      const { shouldSpawnReindex, spawnDetachedReindex } = await import(
+        "../../util/reindex-spawner.js"
+      );
+
+      const idxExists = hasIndex();
+      const stats = idxExists ? indexStats() : { turns: 0, vectors: 0 };
+      const meta = readReindexMeta();
+      // The build always runs out-of-process (`agentwatch reindex`,
+      // detached + unref'd) — never inline here — so a request never
+      // blocks the shared event loop the TUI and this server share.
+      // claimReindexLock() inside the subprocess is what actually
+      // prevents duplicate concurrent builds; this is just "is it worth
+      // spawning one" so we don't fork on every keystroke.
+      if (shouldSpawnReindex(meta, idxExists, stats.vectors)) {
+        spawnDetachedReindex();
+      }
+
+      if (!idxExists || stats.vectors === 0) {
+        // Bail out to BM25 rather than blocking on the index build (which
+        // includes a one-time ~80MB model download). Surface a status so
+        // the UI can show progress instead of a silent stall.
         const hits = searchBm25Only(query, limit);
+        const fresh = readReindexMeta();
+        const status =
+          fresh.status === "running"
+            ? `semantic index building in the background (${fresh.embeddedTurns}/${fresh.queuedTurns} turns embedded so far) — showing BM25 results for now`
+            : "semantic index not built yet — a background build just started (agentwatch reindex). Showing BM25 results for now.";
         return {
           mode,
           hits: hits.map((h) => ({ kind: "semantic" as const, hit: h })),
-          status: "semantic index not built — running BM25 fallback. Build via: agentwatch (press / → semantic mode in TUI)",
+          status,
         };
       }
       const embed = await loadEmbedder();

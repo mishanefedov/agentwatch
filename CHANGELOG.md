@@ -10,6 +10,13 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+### Performance
+- **Semantic index build no longer runs inline.** `agentwatch reindex` builds
+  the search index (BM25 + local embeddings) as a detached subprocess instead
+  of on the TUI's/web server's shared event loop; progress and cancel state
+  live in a `reindex_meta` row in `index.sqlite` that the TUI footer polls, so
+  first-run (and incremental) indexing never freezes the TUI. Fixes #1.
+
 ## [0.1.2] — 2026-05-26
 
 ### Performance
