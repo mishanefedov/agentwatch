@@ -91,8 +91,8 @@ export function startGeminiAdapter(sink: Emit): () => void {
       if (!id || seen.has(id)) continue;
       seen.add(id);
 
-      const ev = translate(msg, sessionId, kind, project);
-      if (ev) {
+      const events = translateGeminiMessage(msg, sessionId, kind, project);
+      for (const ev of events) {
         const parent = pendingParentByFile.get(file);
         if (parent && !firstEventEmitted) {
           ev.details = { ...(ev.details ?? {}), parentSpawnId: parent };
@@ -100,17 +100,6 @@ export function startGeminiAdapter(sink: Emit): () => void {
           firstEventEmitted = true;
         }
         emit(ev);
-      }
-
-      // Each Gemini assistant message can carry an array of toolCalls,
-      // each already including the inline functionResponse. Emit one
-      // event per tool with the result attached — no pairing needed.
-      const toolCalls = msg.toolCalls;
-      if (Array.isArray(toolCalls)) {
-        for (const tc of toolCalls) {
-          const te = translateToolCall(tc, msg, sessionId, kind, project);
-          if (te) emit(te);
-        }
       }
     }
   };
@@ -122,6 +111,50 @@ export function startGeminiAdapter(sink: Emit): () => void {
   return () => {
     void watcher.close();
   };
+}
+
+/** Pure translation of an already-parsed Gemini session JSON document
+ *  (`{ sessionId, kind, messages: [...] }`) into AgentEvents. Shared by the
+ *  live adapter's per-file watch loop above and the MCP server's one-shot
+ *  `parseSession`, so there is exactly one place that understands Gemini's
+ *  session shape — no dedup-by-id here, this always translates every
+ *  message in the document. */
+export function translateGeminiDoc(
+  doc: Record<string, unknown>,
+  sessionId: string,
+  project: string,
+): AgentEvent[] {
+  const kind = typeof doc.kind === "string" ? doc.kind : "main";
+  const messages = Array.isArray(doc.messages) ? doc.messages : [];
+  const out: AgentEvent[] = [];
+  for (const m of messages) {
+    out.push(...translateGeminiMessage(m, sessionId, kind, project));
+  }
+  return out;
+}
+
+/** Translate one Gemini message plus its inline `toolCalls` into zero or
+ *  more AgentEvents, in emission order (the message's own event, if any,
+ *  followed by one event per tool call). */
+function translateGeminiMessage(
+  m: unknown,
+  sessionId: string,
+  kind: string,
+  project: string,
+): AgentEvent[] {
+  if (!m || typeof m !== "object") return [];
+  const msg = m as Record<string, unknown>;
+  const out: AgentEvent[] = [];
+  const ev = translate(msg, sessionId, kind, project);
+  if (ev) out.push(ev);
+  const toolCalls = msg.toolCalls;
+  if (Array.isArray(toolCalls)) {
+    for (const tc of toolCalls) {
+      const te = translateToolCall(tc, msg, sessionId, kind, project);
+      if (te) out.push(te);
+    }
+  }
+  return out;
 }
 
 function translate(

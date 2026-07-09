@@ -10,6 +10,13 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+### Fixed
+- MCP `get_tool_usage_stats` and `get_session_cost` now return real per-tool
+  counts and token/cost breakdowns for Gemini sessions instead of zeroes. The
+  Gemini session-to-`AgentEvent` translation is now a shared pure function
+  (`translateGeminiDoc`) used by both the live adapter and the MCP server's
+  session parser, so there is one canonical implementation.
+
 ## [0.1.2] — 2026-05-26
 
 ### Performance
