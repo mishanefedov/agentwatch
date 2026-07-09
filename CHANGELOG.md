@@ -10,6 +10,15 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+### Added
+- **Cursor adapter now reads real activity**, not just config. It reads
+  `composer.composerData` and `aiService.prompts` from every
+  `workspaceStorage/*/state.vscdb` on the machine, emitting one `session_start`
+  per composer session (with lines added/removed) and `prompt` events anchored
+  to the composer's `createdAt`. Cursor doesn't persist tool calls, token
+  usage, or cost to disk, so those stay absent — documented in
+  `docs/features/agent-detection.md`.
+
 ## [0.1.2] — 2026-05-26
 
 ### Performance

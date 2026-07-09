@@ -25,7 +25,7 @@ or just recognizing it.
 |---|---|---|
 | Claude Code | `~/.claude/projects/` | ✓ |
 | OpenClaw | `~/.openclaw/` | ✓ |
-| Cursor | `~/.cursor/` | ✓ (config-level) |
+| Cursor | `~/.cursor/` or a `workspaceStorage/*/state.vscdb` with activity | ✓ |
 | Gemini CLI | `~/.gemini/` | ✓ |
 | Codex | `~/.codex/` | not yet |
 | Aider | `~/.aider.chat.history.md` or `~/.aider.input.history` | not yet |
@@ -56,6 +56,33 @@ session file: https://github.com/mishanefedov/agentwatch/issues/new
 
 Agent side panel inside the TUI applies the same `●` (green) /
 `●` (yellow) / `○` (gray) color code.
+
+## Cursor: what's captured vs. what isn't
+
+`src/adapters/cursor.ts` reads two independent surfaces, both read-only:
+
+- **Config** (`~/.cursor/mcp.json`, `cli-config.json`, `ide_state.json`,
+  `.cursorrules` / `.cursor/rules/*.mdc`) — watched for changes only.
+- **Activity** — every `workspaceStorage/*/state.vscdb` under
+  `~/Library/Application Support/Cursor/User/` (macOS) or
+  `~/.config/Cursor/User/` (Linux). Each is a VS Code-style
+  `ItemTable(key, value)` SQLite db. We read two keys:
+  - `composer.composerData` → one `session_start` event per composer
+    session, timestamped at its `createdAt`, with `totalLinesAdded` /
+    `totalLinesRemoved` carried in `details.linesChanged`.
+  - `aiService.prompts` → one `prompt` event per entry, anchored to the
+    most-recently-created composer's `createdAt` in that db (there is no
+    per-prompt timestamp and no stored link from a prompt to a
+    composerId, so this is a rough-but-real approximation, not exact).
+
+  These two config surfaces are independent: a Cursor GUI user with no
+  `~/.cursor` directory (never used the CLI) still gets activity events
+  as long as a `state.vscdb` with a composer session exists.
+
+- **What's permanently absent**: tool_call/tool_result, per-turn token
+  usage, and cost. Cursor doesn't write any of that to disk — it isn't a
+  parsing gap, there is nothing on disk to parse. Don't expect Cursor
+  sessions to show token/cost numbers the way Claude Code or Codex do.
 
 ## Failure modes
 

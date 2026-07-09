@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import type { AgentName } from "../schema.js";
+import { findCursorStateDbs, resolveCursorWorkspaceStorageRoot } from "./cursor.js";
 
 export interface DetectedAgent {
   name: AgentName;
@@ -57,8 +58,13 @@ export function detectAgents(): DetectedAgent[] {
       name: "cursor",
       label: "Cursor",
       configPath: join(home, ".cursor", "mcp.json"),
-      present: existsSync(join(home, ".cursor")),
-      instrumented: true, // config-level only in v0; SQLite DB TBD
+      // Present if either the CLI config dir exists OR a workspaceStorage
+      // state.vscdb with real composer/prompt activity exists — the two
+      // are independent (GUI-only Cursor users may have no ~/.cursor).
+      present:
+        existsSync(join(home, ".cursor")) ||
+        findCursorStateDbs(resolveCursorWorkspaceStorageRoot()).length > 0,
+      instrumented: true,
     },
     {
       name: "gemini",
