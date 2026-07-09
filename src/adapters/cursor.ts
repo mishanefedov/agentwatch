@@ -158,7 +158,12 @@ export function translateCursorComposer(entry: CursorComposerEntry, source: stri
   const ts = clampTs(new Date(entry.createdAt).toISOString());
   const archivedTag = entry.isArchived ? " [archived]" : "";
   return {
-    id: nextId(),
+    // Deterministic — this is a backfill replayed in full on every boot
+    // (the whole ItemTable is read fresh each time, unlike the JSONL
+    // adapters' tail-window resume). A nextId() here would insert ~2k
+    // duplicate rows per restart; INSERT OR IGNORE on this id is what
+    // actually dedups.
+    id: `cursor-${entry.composerId}`,
     ts,
     agent: "cursor",
     type: "session_start",
@@ -177,12 +182,16 @@ export function translateCursorComposer(entry: CursorComposerEntry, source: stri
 
 export function translateCursorPrompt(
   prompt: CursorPromptEntry,
+  index: number,
   anchor: CursorComposerEntry,
   source: string,
 ): AgentEvent {
   const ts = clampTs(new Date(anchor.createdAt).toISOString());
   return {
-    id: nextId(),
+    // Deterministic — aiService.prompts is append-only, so a prompt's
+    // index in that array is a stable identity across restarts (same
+    // reasoning as translateCursorComposer above).
+    id: `cursor-${anchor.composerId}-p${index}`,
     ts,
     agent: "cursor",
     type: "prompt",
@@ -420,7 +429,7 @@ export function startCursorAdapter(
     const alreadyEmitted = promptsEmitted.get(dbPath) ?? 0;
     if (prompts.length > alreadyEmitted) {
       for (let i = alreadyEmitted; i < prompts.length; i++) {
-        emit(translateCursorPrompt(prompts[i]!, anchor, dbPath));
+        emit(translateCursorPrompt(prompts[i]!, i, anchor, dbPath));
       }
     }
     // Array can only be read as a whole (no per-row id), so a shrink

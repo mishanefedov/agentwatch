@@ -118,11 +118,18 @@ describe("translateCursorComposer", () => {
     const e = translateCursorComposer({ ...BASE_COMPOSER, isArchived: true }, "/db");
     expect(e.summary).toContain("[archived]");
   });
+
+  it("derives a deterministic id from the composerId (stable across repeated backfills)", () => {
+    const a = translateCursorComposer(BASE_COMPOSER, "/db/state.vscdb");
+    const b = translateCursorComposer(BASE_COMPOSER, "/db/state.vscdb");
+    expect(a.id).toBe(b.id);
+    expect(a.id).toBe(`cursor-${BASE_COMPOSER.composerId}`);
+  });
 });
 
 describe("translateCursorPrompt", () => {
   it("anchors the prompt's ts + sessionId to the given composer", () => {
-    const e = translateCursorPrompt({ text: "refactor the parser" }, BASE_COMPOSER, "/db");
+    const e = translateCursorPrompt({ text: "refactor the parser" }, 0, BASE_COMPOSER, "/db");
     expect(e.agent).toBe("cursor");
     expect(e.type).toBe("prompt");
     expect(e.sessionId).toBe(BASE_COMPOSER.composerId);
@@ -133,9 +140,22 @@ describe("translateCursorPrompt", () => {
 
   it("truncates long prompt text into a single-line summary under 140 chars", () => {
     const long = "x".repeat(500);
-    const e = translateCursorPrompt({ text: long }, BASE_COMPOSER, "/db");
+    const e = translateCursorPrompt({ text: long }, 0, BASE_COMPOSER, "/db");
     expect(e.summary?.length).toBeLessThanOrEqual(140);
     expect(e.summary?.endsWith("...")).toBe(true);
     expect(e.details?.fullText).toBe(long);
+  });
+
+  it("derives a deterministic id from composerId + array index (stable across repeated backfills)", () => {
+    const a = translateCursorPrompt({ text: "fix the bug" }, 3, BASE_COMPOSER, "/db");
+    const b = translateCursorPrompt({ text: "fix the bug" }, 3, BASE_COMPOSER, "/db");
+    expect(a.id).toBe(b.id);
+    expect(a.id).toBe(`cursor-${BASE_COMPOSER.composerId}-p3`);
+  });
+
+  it("gives different prompts at different indices different ids", () => {
+    const a = translateCursorPrompt({ text: "one" }, 0, BASE_COMPOSER, "/db");
+    const b = translateCursorPrompt({ text: "two" }, 1, BASE_COMPOSER, "/db");
+    expect(a.id).not.toBe(b.id);
   });
 });

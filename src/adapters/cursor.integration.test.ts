@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { startCursorAdapter } from "./cursor.js";
+import { openStore, type EventStore } from "../store/sqlite.js";
 import type { AgentEvent } from "../schema.js";
 
 // Mirrors VS Code / Cursor's real ItemTable shape: a single key/value
@@ -166,5 +167,69 @@ describe("startCursorAdapter — SQLite activity (integration)", () => {
     );
     expect(newPrompt).toBeDefined();
     expect(newPrompt?.sessionId).toBe("c1");
+  });
+
+  describe("store-level idempotence across repeated backfills (restart simulation)", () => {
+    let store: EventStore;
+    let storeDir: string;
+
+    beforeEach(() => {
+      storeDir = mkdtempSync(join(tmpdir(), "cursor-adapter-store-"));
+      store = openStore({ dbPath: join(storeDir, "events.db") });
+    });
+
+    afterEach(() => {
+      store.close();
+      rmSync(storeDir, { recursive: true, force: true });
+    });
+
+    it("re-inserting the same full backfill (as on a second process boot) does not grow row count", () => {
+      const wsDir = join(storageRoot, "restart-sim");
+      mkdirSync(wsDir, { recursive: true });
+      seedWorkspaceDb(join(wsDir, "state.vscdb"), {
+        composers: {
+          allComposers: [
+            { composerId: "c1", createdAt: 1_700_000_000_000, totalLinesAdded: 5, totalLinesRemoved: 1 },
+            { composerId: "c2", createdAt: 1_700_000_100_000, totalLinesAdded: 8, totalLinesRemoved: 2 },
+          ],
+        },
+        prompts: [
+          { text: "first prompt" },
+          { text: "second prompt" },
+          { text: "third prompt" },
+        ],
+      });
+
+      // Boot 1: adapter starts fresh (no prior in-memory state), backfills
+      // everything currently on disk, then the process "restarts" (stop()
+      // discards all in-memory seen/emitted tracking).
+      const boot1Events: AgentEvent[] = [];
+      const boot1 = startCursorAdapter(tmpDir, (e) => boot1Events.push(e));
+      boot1.stop();
+      expect(boot1Events.length).toBeGreaterThan(0);
+      store.insertMany(boot1Events);
+      const countAfterBoot1 = store.stats().events;
+
+      // Boot 2: a brand-new adapter instance (fresh Maps), same on-disk
+      // db, same rows still present -> re-emits the identical backfill.
+      const boot2Events: AgentEvent[] = [];
+      const boot2 = startCursorAdapter(tmpDir, (e) => boot2Events.push(e));
+      boot2.stop();
+      expect(boot2Events.length).toBe(boot1Events.length);
+      store.insertMany(boot2Events);
+      const countAfterBoot2 = store.stats().events;
+
+      expect(countAfterBoot2).toBe(countAfterBoot1);
+
+      // The sessions_upsert_on_event_insert trigger must not have kept
+      // bumping event_count for sessions that only ever ignored inserts.
+      // Prompts anchor to the newest composer (c2); c1 only gets its own
+      // session_start.
+      const sessions = store.listSessions({ agent: "cursor" });
+      const c1 = sessions.find((s) => s.sessionId === "c1");
+      const c2 = sessions.find((s) => s.sessionId === "c2");
+      expect(c1?.eventCount).toBe(1);
+      expect(c2?.eventCount).toBe(4); // session_start + 3 prompts
+    });
   });
 });
