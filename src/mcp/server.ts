@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import { claudeProjectsDir } from "../util/workspace.js";
 import { codexSessionsDir, translateCodexLine } from "../adapters/codex.js";
 import { translateClaudeLine } from "../adapters/claude-code.js";
+import { translateGeminiDoc } from "../adapters/gemini.js";
 import { translateSession as translateOpenClawLine } from "../adapters/openclaw.js";
 import {
   translateHermesMessage,
@@ -37,7 +38,7 @@ import { VERSION } from "../util/version.js";
 
 type McpAgent = "claude-code" | "codex" | "gemini" | "openclaw" | "hermes";
 
-interface SessionRef {
+export interface SessionRef {
   agent: McpAgent;
   sessionId: string;
   project: string;
@@ -338,16 +339,9 @@ function openHermesDb(path: string) {
 /** Read a session, translate every line via the relevant adapter,
  *  and return AgentEvents. Unreadable / malformed lines are silently
  *  skipped. */
-function parseSession(s: SessionRef): AgentEvent[] {
+export function parseSession(s: SessionRef): AgentEvent[] {
   if (s.agent === "hermes") return parseHermesSession(s);
-  if (s.agent === "gemini") {
-    // Gemini sessions are single-JSON not JSONL, and we don't yet
-    // translate them to AgentEvents for stats purposes. Return empty
-    // so get_tool_usage_stats / get_session_cost produce honest zeroes
-    // rather than fake data. Raw content still reachable via
-    // get_session_events.
-    return [];
-  }
+  if (s.agent === "gemini") return parseGeminiSession(s);
   const raw = safeReadFile(s.path);
   if (!raw) return [];
   const out: AgentEvent[] = [];
@@ -371,6 +365,25 @@ function parseSession(s: SessionRef): AgentEvent[] {
     if (e) out.push(e);
   }
   return out;
+}
+
+/** Gemini sessions are a single JSON document, not JSONL — parse it once
+ *  and hand off to the same pure translator the live adapter uses. */
+function parseGeminiSession(s: SessionRef): AgentEvent[] {
+  const raw = safeReadFile(s.path);
+  if (!raw) return [];
+  let doc: unknown;
+  try {
+    doc = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!doc || typeof doc !== "object") return [];
+  return translateGeminiDoc(
+    doc as Record<string, unknown>,
+    s.sessionId,
+    s.project,
+  );
 }
 
 function parseHermesSession(s: SessionRef): AgentEvent[] {
