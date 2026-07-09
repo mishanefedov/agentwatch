@@ -34,6 +34,8 @@ import {
 } from "../store/index.js";
 import { withClaudeHookDedup } from "../adapters/hooks-dedup.js";
 import { withClassifier } from "../classify/index.js";
+import { hasIndex, readReindexMeta, type ReindexMeta } from "../util/semantic-index.js";
+import { cancelReindex } from "../util/reindex-spawner.js";
 
 /**
  * agentwatch TUI — live log tail.
@@ -334,6 +336,26 @@ export function App() {
     return () => clearInterval(handle);
   }, [store]);
 
+  // Semantic-index build progress. The build itself never runs here — it's
+  // a detached `agentwatch reindex` subprocess spawned by the web search
+  // route (or by hand). This just polls the sqlite progress row so the
+  // footer can show it without ever blocking on the build. hasIndex() is a
+  // cheap fs.existsSync so users who never touch semantic search never
+  // pay for the poll to open a db handle.
+  const [reindexMeta, setReindexMeta] = useState<ReindexMeta | null>(null);
+  useEffect(() => {
+    const poll = (): void => {
+      if (!hasIndex()) {
+        setReindexMeta(null);
+        return;
+      }
+      setReindexMeta(readReindexMeta());
+    };
+    poll();
+    const id = setInterval(poll, 1500);
+    return () => clearInterval(id);
+  }, []);
+
   const sessionSummaries = useMemo(() => summarizeBySession(anomalies), [anomalies]);
   const anomalyKey = sessionSummaries.map((s) => `${s.sessionId}:${s.headline}`).join("|");
   const bannerSuppressed = state.anomalyDismissKey === anomalyKey;
@@ -422,6 +444,16 @@ export function App() {
     if (input === "D" && anomalyKey) {
       dispatch({ type: "anomaly-dismiss", key: anomalyKey });
     }
+    if (input === "x" && reindexMeta?.status === "running") {
+      const cancelled = cancelReindex(reindexMeta);
+      dispatch({
+        type: "flash",
+        text: cancelled
+          ? "→ cancelling semantic index build…"
+          : "✗ no running reindex to cancel",
+      });
+      setTimeout(() => dispatch({ type: "flash-clear" }), 2000);
+    }
     if (key.downArrow || input === "j")
       dispatch({ type: "move", delta: 1, max: filtered.length });
     if (key.upArrow || input === "k")
@@ -502,6 +534,13 @@ export function App() {
             : "[q] quit  [w] open web UI  [/] filter  [a] agents panel  [f] cycle agent filter  [space] pause  [c] clear"}
         </Text>
         <Text dimColor>All other views (projects, sessions, search, tokens, graph, settings, trends, replay, diffs) → web UI.</Text>
+        {reindexMeta?.status === "running" && (
+          <Text color="yellow">
+            ⟳ indexing semantic search… {reindexMeta.embeddedTurns}/{reindexMeta.queuedTurns || "?"} turns
+            {"  "}({reindexMeta.scannedFiles} files scanned) — runs in the background, keys stay live{"  "}
+            <Text dimColor>[x] cancel</Text>
+          </Text>
+        )}
       </Box>
     </Box>
   );

@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { rrfFuse } from "./semantic-index.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  _resetForTest,
+  claimReindexLock,
+  isPidAlive,
+  readReindexMeta,
+  rrfFuse,
+  writeReindexMeta,
+} from "./semantic-index.js";
 
 describe("rrfFuse", () => {
   it("prefers documents that appear in both rankings", () => {
@@ -40,5 +50,93 @@ describe("rrfFuse", () => {
     }));
     const fused = rrfFuse([{ hits }], 60, 5);
     expect(fused).toHaveLength(5);
+  });
+});
+
+describe("reindex progress + lock", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "agentwatch-index-"));
+    process.env.AGENTWATCH_INDEX_DB_PATH = join(dir, "index.sqlite");
+    _resetForTest();
+  });
+
+  afterEach(() => {
+    _resetForTest();
+    delete process.env.AGENTWATCH_INDEX_DB_PATH;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("defaults to idle before any build has run", () => {
+    const meta = readReindexMeta();
+    expect(meta.status).toBe("idle");
+    expect(meta.pid).toBeNull();
+    expect(meta.embeddedTurns).toBe(0);
+  });
+
+  it("round-trips a written progress patch", () => {
+    writeReindexMeta({
+      status: "running",
+      pid: 12345,
+      scannedFiles: 10,
+      queuedTurns: 100,
+      embeddedTurns: 32,
+    });
+    const meta = readReindexMeta();
+    expect(meta.status).toBe("running");
+    expect(meta.pid).toBe(12345);
+    expect(meta.scannedFiles).toBe(10);
+    expect(meta.queuedTurns).toBe(100);
+    expect(meta.embeddedTurns).toBe(32);
+  });
+
+  it("merges partial patches instead of clobbering unset fields", () => {
+    writeReindexMeta({ status: "running", pid: 1, queuedTurns: 50 });
+    writeReindexMeta({ embeddedTurns: 20 });
+    const meta = readReindexMeta();
+    expect(meta.status).toBe("running");
+    expect(meta.pid).toBe(1);
+    expect(meta.queuedTurns).toBe(50);
+    expect(meta.embeddedTurns).toBe(20);
+  });
+
+  it("isPidAlive is true for the current process", () => {
+    expect(isPidAlive(process.pid)).toBe(true);
+  });
+
+  it("isPidAlive is false for a pid that doesn't exist", () => {
+    // A pid this large is never a real process.
+    expect(isPidAlive(999_999_999)).toBe(false);
+  });
+
+  it("claimReindexLock acquires the slot when idle", () => {
+    const claim = claimReindexLock();
+    expect(claim.acquired).toBe(true);
+    expect(claim.meta.pid).toBe(process.pid);
+    expect(readReindexMeta().status).toBe("running");
+  });
+
+  it("claimReindexLock refuses a second claim while one is alive", () => {
+    const first = claimReindexLock();
+    expect(first.acquired).toBe(true);
+    const second = claimReindexLock();
+    expect(second.acquired).toBe(false);
+    expect(second.meta.pid).toBe(process.pid);
+  });
+
+  it("claimReindexLock recovers a stale lock from a dead pid", () => {
+    writeReindexMeta({ status: "running", pid: 999_999_999 });
+    const claim = claimReindexLock();
+    expect(claim.acquired).toBe(true);
+    expect(claim.meta.pid).toBe(process.pid);
+  });
+
+  it("claimReindexLock re-acquires after a previous build finished", () => {
+    writeReindexMeta({ status: "done", pid: 1, embeddedTurns: 10 });
+    const claim = claimReindexLock();
+    expect(claim.acquired).toBe(true);
+    // The new claim resets counters for the fresh run.
+    expect(claim.meta.embeddedTurns).toBe(0);
   });
 });

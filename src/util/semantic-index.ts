@@ -29,6 +29,13 @@ const DB_PATH = path.join(DB_DIR, "index.sqlite");
 export const MODEL_ID = "Xenova/bge-small-en-v1.5";
 export const EMBED_DIM = 384;
 
+/** Override the index db path (tests, or advanced setups). Mirrors the
+ *  HERMES_DB_PATH convention used by the Hermes adapter. */
+function resolveDbPath(): string {
+  const override = process.env.AGENTWATCH_INDEX_DB_PATH?.trim();
+  return override ? override : DB_PATH;
+}
+
 let db: DB | null = null;
 let embedderPromise: Promise<EmbedFn> | null = null;
 
@@ -64,8 +71,9 @@ export interface SearchHit {
 
 function openDb(): DB {
   if (db) return db;
-  fs.mkdirSync(DB_DIR, { recursive: true });
-  db = new Database(DB_PATH);
+  const dbPath = resolveDbPath();
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
@@ -82,6 +90,18 @@ function openDb(): DB {
     CREATE TABLE IF NOT EXISTS turns_vec (
       id TEXT PRIMARY KEY,
       embedding BLOB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS reindex_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      status TEXT NOT NULL,
+      pid INTEGER,
+      started_at TEXT,
+      updated_at TEXT,
+      scanned_files INTEGER NOT NULL DEFAULT 0,
+      queued_turns INTEGER NOT NULL DEFAULT 0,
+      embedded_turns INTEGER NOT NULL DEFAULT 0,
+      skipped_turns INTEGER NOT NULL DEFAULT 0,
+      error TEXT
     );
   `);
   return db;
@@ -128,7 +148,116 @@ export async function loadEmbedder(): Promise<EmbedFn> {
 }
 
 export function hasIndex(): boolean {
-  return fs.existsSync(DB_PATH);
+  return fs.existsSync(resolveDbPath());
+}
+
+// ─── Reindex progress + lock (used by `agentwatch reindex`) ───────────────
+//
+// The build itself runs in a detached subprocess (see
+// src/util/reindex-runner.ts + reindex-spawner.ts) so it never shares an
+// event loop with the TUI or the web server. Progress is written here, to
+// a single-row table in the same sqlite file the build writes to, so any
+// process (TUI footer, web search route, another CLI invocation) can poll
+// it without IPC.
+
+export type ReindexStatus = "idle" | "running" | "done" | "error" | "cancelled";
+
+export interface ReindexMeta {
+  status: ReindexStatus;
+  pid: number | null;
+  startedAt: string | null;
+  updatedAt: string | null;
+  scannedFiles: number;
+  queuedTurns: number;
+  embeddedTurns: number;
+  skippedTurns: number;
+  error: string | null;
+}
+
+const IDLE_META: ReindexMeta = {
+  status: "idle",
+  pid: null,
+  startedAt: null,
+  updatedAt: null,
+  scannedFiles: 0,
+  queuedTurns: 0,
+  embeddedTurns: 0,
+  skippedTurns: 0,
+  error: null,
+};
+
+/** Read the current reindex status. Safe to call even if no build has
+ *  ever run — returns the idle default. */
+export function readReindexMeta(): ReindexMeta {
+  const d = openDb();
+  const row = d
+    .prepare(
+      `SELECT status, pid,
+              started_at as startedAt, updated_at as updatedAt,
+              scanned_files as scannedFiles, queued_turns as queuedTurns,
+              embedded_turns as embeddedTurns, skipped_turns as skippedTurns,
+              error
+       FROM reindex_meta WHERE id = 1`,
+    )
+    .get() as ReindexMeta | undefined;
+  return row ?? { ...IDLE_META };
+}
+
+/** Merge `patch` into the single reindex_meta row (upsert). */
+export function writeReindexMeta(patch: Partial<ReindexMeta>): void {
+  const d = openDb();
+  const current = readReindexMeta();
+  const merged: ReindexMeta = { ...current, ...patch };
+  d.prepare(
+    `INSERT INTO reindex_meta
+       (id, status, pid, started_at, updated_at, scanned_files, queued_turns, embedded_turns, skipped_turns, error)
+     VALUES (1, @status, @pid, @startedAt, @updatedAt, @scannedFiles, @queuedTurns, @embeddedTurns, @skippedTurns, @error)
+     ON CONFLICT(id) DO UPDATE SET
+       status = excluded.status,
+       pid = excluded.pid,
+       started_at = excluded.started_at,
+       updated_at = excluded.updated_at,
+       scanned_files = excluded.scanned_files,
+       queued_turns = excluded.queued_turns,
+       embedded_turns = excluded.embedded_turns,
+       skipped_turns = excluded.skipped_turns,
+       error = excluded.error`,
+  ).run(merged);
+}
+
+/** True if `pid` refers to a live process we're allowed to see (or don't
+ *  have permission to see, which still means it's alive). */
+export function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Claim the single reindex slot. Returns `acquired: false` if another
+ *  process is already running (and still alive) so callers never spawn
+ *  a second concurrent build. */
+export function claimReindexLock(): { acquired: boolean; meta: ReindexMeta } {
+  const meta = readReindexMeta();
+  if (meta.status === "running" && meta.pid != null && isPidAlive(meta.pid)) {
+    return { acquired: false, meta };
+  }
+  const now = new Date().toISOString();
+  const next: ReindexMeta = {
+    status: "running",
+    pid: process.pid,
+    startedAt: now,
+    updatedAt: now,
+    scannedFiles: 0,
+    queuedTurns: 0,
+    embeddedTurns: 0,
+    skippedTurns: 0,
+    error: null,
+  };
+  writeReindexMeta(next);
+  return { acquired: true, meta: next };
 }
 
 export function indexStats(): { turns: number; vectors: number } {

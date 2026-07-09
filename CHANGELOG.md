@@ -10,6 +10,13 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+### Performance
+- **Semantic index build no longer runs inline.** `agentwatch reindex` builds
+  the search index (BM25 + local embeddings) as a detached subprocess instead
+  of on the TUI's/web server's shared event loop; progress and cancel state
+  live in a `reindex_meta` row in `index.sqlite` that the TUI footer polls, so
+  first-run (and incremental) indexing never freezes the TUI. Fixes #1.
+
 ### Added
 - **Cursor adapter now reads real activity**, not just config. It reads
   `composer.composerData` and `aiService.prompts` from every
