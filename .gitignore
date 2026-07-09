@@ -6,7 +6,8 @@ dist
 .env.local
 coverage
 .serena/
-.claude/
+.claude/*
+!.claude/commands/
 .openclaw/
 .agentwatch-bot/
 .gstack/
