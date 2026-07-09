@@ -10,6 +10,8 @@ layout can change freely within a minor version.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-09
+
 ### Performance
 - **Semantic index build no longer runs inline.** `agentwatch reindex` builds
   the search index (BM25 + local embeddings) as a detached subprocess instead
