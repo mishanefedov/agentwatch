@@ -82,7 +82,7 @@ export function SearchPage() {
             <ul className="text-xs space-y-1 inline-block text-left">
               <li><b>live</b> — substring across the current in-memory buffer (fast, recent only)</li>
               <li><b>cross</b> — ripgrep across every JSONL on disk (slow first time, thorough)</li>
-              <li><b>semantic</b> — hybrid BM25 + embedding search (fuzzy, needs the index built in the TUI first)</li>
+              <li><b>semantic</b> — hybrid BM25 + embedding search (fuzzy; first search here starts a background index build — you'll see BM25 results while it finishes)</li>
             </ul>
           </div>
         )}
