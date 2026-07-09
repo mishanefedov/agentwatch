@@ -18,6 +18,13 @@ layout can change freely within a minor version.
   first-run (and incremental) indexing never freezes the TUI. Fixes #1.
 
 ### Added
+- **Cursor adapter now reads real activity**, not just config. It reads
+  `composer.composerData` and `aiService.prompts` from every
+  `workspaceStorage/*/state.vscdb` on the machine, emitting one `session_start`
+  per composer session (with lines added/removed) and `prompt` events anchored
+  to the composer's `createdAt`. Cursor doesn't persist tool calls, token
+  usage, or cost to disk, so those stay absent — documented in
+  `docs/features/agent-detection.md`.
 - Scheduled-jobs surface (`/cron`) now discovers macOS launchd user agents
   (`~/Library/LaunchAgents/*.plist`, with live `launchctl` health) and the
   user crontab (`crontab -l`) alongside existing OpenClaw cron/heartbeats,

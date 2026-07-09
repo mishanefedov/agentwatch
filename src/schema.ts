@@ -109,6 +109,14 @@ export interface EventDetails {
    *  re-querying the adapter. Adapter populates from Claude `obj.cwd`
    *  or OpenClaw `sessionCwd`; null when the adapter has no cwd context. */
   cwd?: string;
+  /** Lines added/removed for a coarse session-level event where we only
+   *  have a totals snapshot, not a diff (e.g. Cursor's composer.composerData
+   *  rows, which carry totalLinesAdded/totalLinesRemoved but no per-turn
+   *  breakdown). */
+  linesChanged?: {
+    added: number;
+    removed: number;
+  };
   /** Activity category — one of ACTIVITY_CATEGORIES. Heuristically assigned
    *  on emit by the classify wrapper (AUR-264). Used by the per-session
    *  and per-project activity views to answer "where is my spend going?". */
