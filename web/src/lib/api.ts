@@ -168,7 +168,14 @@ export const api = {
 
   permissions: () => getJson<any>("/api/permissions"),
 
-  cron: () => getJson<{ jobs: any[]; heartbeats: any[]; scheduledEvents: AgentEvent[] }>("/api/cron"),
+  cron: () =>
+    getJson<{
+      jobs: any[];
+      heartbeats: any[];
+      launchd: any[];
+      crontab: any[];
+      scheduledEvents: AgentEvent[];
+    }>("/api/cron"),
 
   config: (kind: "budgets" | "anomaly" | "triggers") =>
     getJson<{ kind: string; path: string; value: any; defaults: any }>(`/api/config/${kind}`),

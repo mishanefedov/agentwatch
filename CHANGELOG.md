@@ -18,6 +18,17 @@ layout can change freely within a minor version.
   to the composer's `createdAt`. Cursor doesn't persist tool calls, token
   usage, or cost to disk, so those stay absent — documented in
   `docs/features/agent-detection.md`.
+- Scheduled-jobs surface (`/cron`) now discovers macOS launchd user agents
+  (`~/Library/LaunchAgents/*.plist`, with live `launchctl` health) and the
+  user crontab (`crontab -l`) alongside existing OpenClaw cron/heartbeats,
+  and badges jobs whose command mentions a known AI agent binary.
+
+### Fixed
+- MCP `get_tool_usage_stats` and `get_session_cost` now return real per-tool
+  counts and token/cost breakdowns for Gemini sessions instead of zeroes. The
+  Gemini session-to-`AgentEvent` translation is now a shared pure function
+  (`translateGeminiDoc`) used by both the live adapter and the MCP server's
+  session parser, so there is one canonical implementation.
 
 ## [0.1.2] — 2026-05-26
 
